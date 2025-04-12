@@ -6,132 +6,122 @@ from opensearchpy import OpenSearch
 from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe
 
 def generate_label_sequence(group):
-    """Generate a label sequence that includes label counts for each envelope."""
+    """Generate a label sequence with counts for each envelope."""
     label_counts = group['label'].value_counts().sort_index()
-    label_sequence = '->'.join([f"{label}:{count}" for label, count in label_counts.items()])
-    return label_sequence
+    return '->'.join([f"{label}:{count}" for label, count in label_counts.items()])
 
 def aggregate_embeddings(embeddings):
-    """Aggregates embeddings by summing them (or use another aggregation technique)."""
+    """Aggregate embeddings by summing them."""
     return np.sum(np.stack(embeddings), axis=0)
 
 def app():
-    st.title('Comparação de Processos')
-    st.write("Identifica processos similares com base em um processo de referência.")
+    st.title('Process Comparison')
+    st.write("Identifies similar processes based on a reference process.")
 
-    # Entrada do envelope de referência
-    reference_envelope = st.sidebar.text_input("Digite o número do envelope de referência")
-    
+    # Input for the reference envelope
+    reference_envelope = st.sidebar.text_input("Enter the reference envelope number")
+
     if reference_envelope:
-        # Conectar ao OpenSearch e buscar documentos
+        # Connect to OpenSearch and fetch documents
         HOST = "10.10.25.161"
         PORT = 9200
         es = connect_opensearch(HOST, PORT)
         if not es.ping():
-            st.sidebar.error("Não foi possível conectar ao OpenSearch")
+            st.sidebar.error("Failed to connect to OpenSearch")
             return
-        else:
-            st.sidebar.success("Conexão bem-sucedida")
-        
-        # Layout do aplicativo
-        st.sidebar.title("Configurações")
+        st.sidebar.success("Connection successful")
+
+        # App configuration
+        st.sidebar.title("Settings")
         opensearch_index = st.sidebar.text_input("OpenSearch Index", "classificador_dados_sensiveis")
         documents = fetch_documents(es, opensearch_index)
-        
-        if documents:
-            df = create_dataframe(documents)
-            
-            # Garantir que apenas labels válidos sejam usados
-            df_filtered = df[df['label'].notna() & (df['label'] != "")]
-            
-            if df_filtered.empty:
-                st.error("Nenhum documento com rótulos válidos foi encontrado.")
-                return
-            
-            st.session_state.df = df_filtered
-            
-            # Debugging: Display a sample of the filtered dataframe
-            #st.write("Dados filtrados (Amostra):")
-            #st.write(df_filtered.head())
 
-            # Agrupar documentos por envelope e criar uma sequência de labels com contagem
-            df_grouped = df_filtered.groupby('envelope').apply(generate_label_sequence).reset_index()
-            df_grouped.columns = ['envelope', 'label_sequence']
+        if not documents:
+            st.error("No documents found in the specified index.")
+            return
 
-            # Debugging: Display grouped dataframe to check label sequences
-            #st.write("Dados agrupados por envelope (Amostra):")
-            #st.write(df_grouped.head())
+        df = create_dataframe(documents)
 
-            # Identificar a label_sequence do envelope de referência
-            reference_label_sequence = df_grouped[df_grouped['envelope'] == reference_envelope]['label_sequence'].values
+        # Ensure 'label' column contains strings and filter invalid entries
+        df['label'] = df['label'].astype(str)
+        df_filtered = df[df['label'].notna() & (df['label'] != "") & (df['label'] != "nan")]
 
-            if len(reference_label_sequence) == 0:
-                st.warning("Envelope de referência não encontrado ou não possui labels válidos.")
-                return
-            
-            reference_label_sequence = reference_label_sequence[0]
-            st.write(f"Sequência de labels do envelope de referência: {reference_label_sequence}")
-            
-            # Identificar processos com a mesma sequência de labels
-            common_envelopes = df_grouped[df_grouped['label_sequence'] == reference_label_sequence]['envelope']
-            df_same_sequence = df_filtered[df_filtered['envelope'].isin(common_envelopes)]
-            
-            # Debugging: Display dataframe with the same sequence of labels
-            #st.write("Documentos com a mesma sequência de labels:")
-            #st.write(df_same_sequence.head())
+        if df_filtered.empty:
+            st.error("No documents with valid labels found.")
+            return
 
-            # Agregar embeddings por processo
-            df_embeddings = df_same_sequence.groupby('envelope')['embedding_completo'].apply(lambda x: aggregate_embeddings(x.tolist())).reset_index()
+        st.session_state.df = df_filtered
 
-            # Calcular a similaridade dos embeddings usando similaridade cosseno
-            similarity_results = []
-            reference_embedding = df_embeddings[df_embeddings['envelope'] == reference_envelope]['embedding_completo'].values
+        # Group documents by envelope and create a label sequence with counts
+        df_grouped = df_filtered.groupby('envelope').apply(generate_label_sequence).reset_index()
+        df_grouped.columns = ['envelope', 'label_sequence']
 
-            if len(reference_embedding) == 0:
-                st.error("Nenhum embedding encontrado para o envelope de referência.")
-                return
-            
-            reference_embedding = reference_embedding[0]
+        # Identify the label sequence of the reference envelope
+        reference_label_sequence = df_grouped[df_grouped['envelope'] == reference_envelope]['label_sequence'].values
 
-            for i in range(len(df_embeddings)):
-                envelope = df_embeddings.iloc[i]['envelope']
-                if envelope == reference_envelope:
-                    continue
-                
-                sim = cosine_similarity([reference_embedding], [df_embeddings.iloc[i]['embedding_completo']])[0][0]
-                similarity_results.append({
-                    'envelope': envelope,
-                    'similarity': sim
-                })
+        if len(reference_label_sequence) == 0:
+            st.warning("Reference envelope not found or has no valid labels.")
+            return
 
-            # Check if similarity results are available
-            if not similarity_results:
-                st.warning("Nenhum processo similar encontrado.")
-                return
+        reference_label_sequence = reference_label_sequence[0]
+        st.write(f"Label sequence of the reference envelope: {reference_label_sequence}")
 
-            # Converter resultados para DataFrame e encontrar o processo mais similar
-            df_similarity = pd.DataFrame(similarity_results)
-            most_similar_process = df_similarity.loc[df_similarity['similarity'].idxmax()]
-            
-            st.write(f"Processo mais similar ao envelope {reference_envelope}: {most_similar_process['envelope']} com similaridade de {most_similar_process['similarity']:.4f}")
+        # Find processes with the same label sequence
+        common_envelopes = df_grouped[df_grouped['label_sequence'] == reference_label_sequence]['envelope']
+        df_same_sequence = df_filtered[df_filtered['envelope'].isin(common_envelopes)]
 
-            # Exibe o conteúdo de 'ds_documento_ocr' lado a lado com os labels
-            proc1_docs = df_filtered[df_filtered['envelope'] == reference_envelope].sort_values(by='label')[['label', 'ds_documento_ocr']].values.tolist()
-            proc2_docs = df_filtered[df_filtered['envelope'] == most_similar_process['envelope']].sort_values(by='label')[['label', 'ds_documento_ocr']].values.tolist()
-            
-            # Garantir que os documentos sejam exibidos lado a lado, mesmo que os números de documentos sejam diferentes
-            max_docs = max(len(proc1_docs), len(proc2_docs))
-            proc1_docs.extend([["", ""]] * (max_docs - len(proc1_docs)))  # Preenche com strings vazias
-            proc2_docs.extend([["", ""]] * (max_docs - len(proc2_docs)))
+        # Aggregate embeddings per process
+        df_embeddings = df_same_sequence.groupby('envelope')['embedding_completo'].apply(lambda x: aggregate_embeddings(x.tolist())).reset_index()
 
-            for (label1, doc1), (label2, doc2) in zip(proc1_docs, proc2_docs):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.text(f"Label: {label1}")
-                    st.text_area("Processo de Referência", doc1[:1000], height=150)
-                with col2:
-                    st.text(f"Label: {label2}")
-                    st.text_area("Processo Similar", doc2[:1000], height=150)
+        # Calculate similarity using cosine similarity
+        similarity_results = []
+        reference_embedding = df_embeddings[df_embeddings['envelope'] == reference_envelope]['embedding_completo'].values
+
+        if len(reference_embedding) == 0:
+            st.error("No embedding found for the reference envelope.")
+            return
+
+        reference_embedding = reference_embedding[0]
+
+        for i in range(len(df_embeddings)):
+            envelope = df_embeddings.iloc[i]['envelope']
+            if envelope == reference_envelope:
+                continue
+
+            sim = cosine_similarity([reference_embedding], [df_embeddings.iloc[i]['embedding_completo']])[0][0]
+            similarity_results.append({
+                'envelope': envelope,
+                'similarity': sim
+            })
+
+        # Check if similarity results are available
+        if not similarity_results:
+            st.warning("No similar processes found.")
+            return
+
+        # Convert results to DataFrame and find the most similar process
+        df_similarity = pd.DataFrame(similarity_results)
+        most_similar_process = df_similarity.loc[df_similarity['similarity'].idxmax()]
+
+        st.write(f"Most similar process to envelope {reference_envelope}: {most_similar_process['envelope']} with similarity of {most_similar_process['similarity']:.4f}")
+
+        # Display 'ds_documento_ocr' content side by side with labels
+        proc1_docs = df_filtered[df_filtered['envelope'] == reference_envelope].sort_values(by='label')[['label', 'ds_documento_ocr']].values.tolist()
+        proc2_docs = df_filtered[df_filtered['envelope'] == most_similar_process['envelope']].sort_values(by='label')[['label', 'ds_documento_ocr']].values.tolist()
+
+        # Ensure documents are displayed side by side, even if the number of documents differs
+        max_docs = max(len(proc1_docs), len(proc2_docs))
+        proc1_docs.extend([["", ""]] * (max_docs - len(proc1_docs)))  # Pad with empty strings
+        proc2_docs.extend([["", ""]] * (max_docs - len(proc2_docs)))
+
+        for (label1, doc1), (label2, doc2) in zip(proc1_docs, proc2_docs):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.text(f"Label: {label1}")
+                st.text_area("Reference Process", doc1[:1000], height=150)
+            with col2:
+                st.text(f"Label: {label2}")
+                st.text_area("Similar Process", doc2[:1000], height=150)
 
 if __name__ == "__main__":
     app()
