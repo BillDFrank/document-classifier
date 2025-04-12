@@ -43,7 +43,7 @@ The main entry point is scripts/run_pipeline.py, which orchestrates the document
 
 2. **Run the Pipeline**:
    ```bash
-   python scripts/run_pipeline.py
+   streamlit run scripts\run_pipeline.py
    ```
 
 Outputs (e.g., plots, models) are saved in outputs/ and models/.
