@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from opensearchpy import OpenSearch
-from utils import connect_opensearch, fetch_documents, create_dataframe
+from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe
 
 def generate_label_sequence(group):
     """Generate a label sequence that includes label counts for each envelope."""

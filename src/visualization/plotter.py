@@ -4,7 +4,7 @@ import numpy as np
 import plotly.express as px
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from utils import connect_opensearch, fetch_documents, create_dataframe, persist_labels
+from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe, persist_labels
 
 def calculate_clusters(df, n_clusters, selected_labels):
     # Filtrar os documentos pelos rótulos selecionados

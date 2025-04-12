@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import joblib
-from utils import connect_opensearch, fetch_documents, create_dataframe, persist_labels
+from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe, persist_labels
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC

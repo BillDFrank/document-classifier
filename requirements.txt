@@ -1,0 +1,14 @@
+community==1.0.0b1
+joblib==1.4.2
+networkx==3.4.2
+nltk==3.9.1
+numpy==2.2.4
+pandas==2.2.3
+plotly==6.0.1
+Requests==2.32.3
+scikit_learn==1.6.1
+streamlit==1.44.1
+torch==2.6.0
+tqdm==4.67.1
+transformers==4.51.2
+streamlit

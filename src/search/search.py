@@ -1,64 +1,61 @@
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder
-from utils import persist_labels, calculate_similarity, propose_cluster_names
+from src.utilities.helpers import calculate_similarity
 import os
 
 PARQUET_FILE = "embeddings_labeled.parquet"
 
-def perform_clustering(df, n_clusters):
-    """Performs K-Means clustering on the dataset."""
-    if df.empty:
-        return None, None
-
-    # Feature Engineering
-    enc = OneHotEncoder(handle_unknown="ignore")
-    X = enc.fit_transform(df[['texto_agrupado']]).toarray()
-
-    # Apply K-Means
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    df["cluster"] = kmeans.fit_predict(X)
-
-    return df, kmeans
 
 def app():
-    st.title("Cluster")
+    lista_tipo = ["", "SENSIVEL", "NAO SENSIVEL"]
+    st.title('Cluster')
     st.write("Sugere clusters para facilitar classificação.")
 
     st.sidebar.title("Configurações")
     n_similares = st.sidebar.slider("Número de Elementos Similares", 1, 30, 10)
-    n_clusters = st.sidebar.slider("Número de Clusters", 2, 50, 10)
+    n_clusters = st.sidebar.slider("Número de Clusters", 2, 50, 5)
+    search_words = st.sidebar.text_input("Pesquisar Palavras", "")
+    active_state = st.sidebar.checkbox("Pesquisar em rotulados", value=False)
+    selected_tipo = st.selectbox("Selecione um tipo", lista_tipo)
     submit_button = st.sidebar.button("Submeter")
 
-    # Load DataFrame from Parquet file
-    if "df" not in st.session_state:
-        if not os.path.exists(PARQUET_FILE):
-            st.error(f"Arquivo '{PARQUET_FILE}' não encontrado. Gere os embeddings primeiro.")
-            return
-        else:
-            st.session_state.df = pd.read_parquet(PARQUET_FILE)
-
-    # Perform clustering only when "Submeter" is clicked
     if submit_button:
-        df = st.session_state.df
-        df, kmeans = perform_clustering(df, n_clusters)
+        if not os.path.exists(PARQUET_FILE):
+            st.error(f"Arquivo '{PARQUET_FILE}' não encontrado.")
+            return
 
-        if df is not None:
+        df = pd.read_parquet(PARQUET_FILE)
+        if 'label' not in df.columns:
+            df['label'] = ""
+
+        if selected_tipo:
+            df = df[df['label'] == selected_tipo]
+        elif search_words:
+            df = df[df['texto_agrupado'].str.contains(search_words, case=False, na=False)]
+
+        if df.shape[0] > 3:
+            
             df = calculate_similarity(df, n_clusters)
-            st.session_state.df = df
-            st.session_state.cluster = 0
-            st.success("Clusterização concluída com sucesso!")
+        else:
+            
+            df['cluster'] = 0
 
-    # If clustering has been performed, show the labeling interface
-    if "cluster" in st.session_state:
+        st.session_state.df = df
+        st.session_state.cluster = 0
+        st.session_state.active_state = active_state
+
+    if 'df' in st.session_state:
         df = st.session_state.df
         distinct_labels = df['label'].unique().tolist()
-        distinct_labels = [x for x in distinct_labels if x is not None]
+        distinct_labels = [x for x in distinct_labels if x != ""]
         distinct_labels.sort()
-        df['label'] = df['label'].fillna("")
-        df = df[df['label'] == ""]
+
+        if not st.session_state.active_state:
+            df = df[df['label'] == ""]
+
         cluster = st.session_state.cluster
 
         st.header("Parâmetros")
@@ -78,19 +75,17 @@ def app():
                 st.session_state.cluster = (cluster + 1) % n_clusters
                 cluster = st.session_state.cluster
 
-        similar_docs = df[(df['cluster'] == cluster) & (df['label'] == "")]
+        if not st.session_state.active_state:
+            similar_docs = df[(df['cluster'] == cluster) & (df['label'] == "")]
+        else:
+            similar_docs = df[df['cluster'] == cluster]
         similar_docs = similar_docs.head(n_similares)
 
         st.header("Seleção de Rótulos dos Clusters")
 
-        if 'rótulos_existentes' not in st.session_state:
-            if len(distinct_labels) < 2:
-                st.session_state.rótulos_existentes = [
-                    "SIGILOSO", "NAO SIGILOSO"
-                ]
-                st.session_state.rótulos_existentes.sort()
-            else:
-                st.session_state.rótulos_existentes = distinct_labels
+        #if 'rótulos_existentes' not in st.session_state:
+        #    st.session_state.rótulos_existentes = ["", "SENSIVEL", "NAO SENSIVEL"]
+        #    st.session_state.rótulos_existentes.sort()
 
         label_cols = st.columns([2, 3, 2])
         with label_cols[0]:
@@ -108,15 +103,20 @@ def app():
 
         selected_similars = []
         for idx, row in similar_docs.iterrows():
-            if st.checkbox(f"{row['texto_agrupado'][0:1000]}", key=idx, value=True):
-                selected_similars.append(idx)
+            col1, col2 = st.columns([7, 1])
+            with col1:
+                if st.checkbox(f"{row['texto_agrupado'][0:2500]}", key=idx, value=True):
+                    selected_similars.append(idx)
+            with col2:
+                st.write(f"Label: {row['label']}")
 
         if st.button("ROTULAR"):
+            df_original = st.session_state.df
             for idx in selected_similars:
-                st.session_state.df.at[idx, 'label'] = selected_label
-
+                df_original.at[idx, 'label'] = selected_label
+            st.session_state.df = df_original
             try:
-                st.session_state.df.to_parquet(PARQUET_FILE, index=False)
+                df_original.to_parquet(PARQUET_FILE, index=False)
                 st.success("Elementos rotulados com sucesso e arquivo atualizado!")
             except Exception as e:
                 st.error(f"Erro ao salvar arquivo: {e}")

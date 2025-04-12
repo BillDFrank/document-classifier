@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.cluster import KMeans
 from sklearn.decomposition import LatentDirichletAllocation as LDA
 from opensearchpy import OpenSearch, RequestsHttpConnection
-from utils import connect_opensearch, fetch_documents, create_dataframe, persist_labels, propose_cluster_names, calculate_suggested_label
+from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe, persist_labels, propose_cluster_names, calculate_suggested_label
 
 # Funções auxiliares
 def calculate_similarity_split(df, n_clusters, selected_label_):

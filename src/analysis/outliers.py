@@ -1,31 +1,62 @@
+import networkx as nx
+import community
+from itertools import combinations
+from torch.utils.data import DataLoader
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.cluster import KMeans
-from sklearn.decomposition import LatentDirichletAllocation as LDA
 from opensearchpy import OpenSearch, RequestsHttpConnection
-from utils import connect_opensearch, fetch_documents, create_dataframe, persist_labels
-# Funções auxiliares
+from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe, persist_labels
 
 
-def calculate_similarity_split(df, n_clusters, method, selected_label_):
+def calculate_similarity_split(df, threshold, selected_label_):
+    # Filtrar o DataFrame com base no label selecionado
     df_rotulados = df[df['label'] == selected_label_].copy()
+    
+    # Obter os embeddings completos
     embeddings = np.array(df_rotulados["embedding_completo"].tolist())
-    if method == 'KMeans':
-        model = KMeans(n_clusters=n_clusters, n_init=10)
-        labels = model.fit_predict(embeddings)
-    else:  # LDA
-        model = LDA(n_components=n_clusters)
-        labels = model.fit_transform(embeddings).argmax(axis=1)
-    df_rotulados.loc[:, 'cluster'] = labels
+
+    # Construir o grafo
+    G = nx.Graph()
+    
+    # Adicionar nós ao grafo
+    G.add_nodes_from(df_rotulados.index)
+    
+    # Combinações de pares para calcular similaridade
+    pairs = list(combinations(df_rotulados.index, 2))
+    
+    # Calcular similaridade utilizando embeddings
+    similarity_scores = []
+    for idx1, idx2 in pairs:
+        similarity = np.dot(embeddings[df_rotulados.index.get_loc(idx1)], embeddings[df_rotulados.index.get_loc(idx2)]) / (
+            np.linalg.norm(embeddings[df_rotulados.index.get_loc(idx1)]) * np.linalg.norm(embeddings[df_rotulados.index.get_loc(idx2)])
+        )
+        similarity_scores.append(similarity)
+    
+    # Adicionar arestas ao grafo com base no threshold
+    for i, (idx1, idx2) in enumerate(pairs):
+        if similarity_scores[i] > threshold:
+            G.add_edge(idx1, idx2)
+    
+    # Aplicar o algoritmo de Louvain para detecção de comunidades
+    partition = community.best_partition(G)
+    
+    # Associar os rótulos de cluster ao DataFrame
+    df_rotulados['cluster'] = df_rotulados.index.map(partition)
+    
+    # Identificar outliers e atribuí-los ao cluster -1
+    for idx in df_rotulados.index:
+        if G.degree[idx] == 0:  # Sem conexões, é outlier
+            df_rotulados.at[idx, 'cluster'] = -1
+    
     return df_rotulados
 
 
 def app():
     st.title('Cluster')
-    st.write("Dividir clusters.")
+    st.write("Identificar clusters e outliers.")
 
-    # Layout do aplicativo
+    # Sidebar configuration
     st.sidebar.title("Configurações")
     
     # Conectar ao OpenSearch e buscar documentos
@@ -62,26 +93,25 @@ def app():
             if 'rótulos_existentes' not in st.session_state:
                 st.session_state.rótulos_existentes = distinct_labels
     
-    n_similares = st.sidebar.slider("Número de Elementos Similares", 1, 25, 10)
-    n_clusters = st.sidebar.slider("Número de Clusters", 2, 5, 2)
-    clustering_method = st.sidebar.selectbox("Método de Clusterização", ["KMeans", "LDA"])
+    threshold = st.sidebar.slider("Threshold de Similaridade", 0.5, 1.0, 0.99)
     selected_label_ = st.sidebar.selectbox("Selecione um rótulo", st.session_state.rótulos_existentes, key="selected_label_")
     submit_button = st.sidebar.button("Submeter")
 
     if submit_button:
-        df = calculate_similarity_split(df, n_clusters, clustering_method, selected_label_)
+        df = calculate_similarity_split(df, threshold, selected_label_)
         st.session_state.df = df
-        st.session_state.cluster = 0
+        st.session_state.cluster = -1  # Começar exibindo os outliers
+        st.session_state.n_clusters = df['cluster'].nunique()
 
     if 'df' in st.session_state:
         df = st.session_state.df
         cluster = st.session_state.cluster
+        n_clusters = st.session_state.n_clusters
+
         st.header("Parâmetros")
-        st.write(f"Exibindo {n_similares} elementos similares")
-        st.write(f"Cluster: {cluster+1} de {n_clusters}")
         labels_count = df.shape[0]
         cluster_count = df['cluster'].eq(cluster).sum()
-        st.write(f"Número de elementos sem rótulo: {cluster_count}/{labels_count}")
+        st.write(f"Número de elementos no cluster: {cluster_count}/{labels_count}")
         
         next_back_cols = st.columns([1, 1, 2])
         with next_back_cols[0]:
@@ -93,9 +123,9 @@ def app():
                 st.session_state.cluster = (cluster + 1) % n_clusters
                 cluster = st.session_state.cluster
 
-        similar_docs = df[(df['cluster'] == cluster)]
-        similar_docs = similar_docs.head(n_similares)
-        
+        # Atualizar a exibição dos documentos conforme o cluster atual
+        similar_docs = df[df['cluster'] == cluster]
+
         st.header("Seleção de Rótulos dos Clusters")
 
         label_cols = st.columns([2, 3, 2])
@@ -117,7 +147,7 @@ def app():
         for idx, row in similar_docs.iterrows():
             col1, col2 = st.columns([7, 1])
             with col1:
-                if st.checkbox(f"{row['ds_documento_ocr'][0:600]}", key=f"chk_{idx}_{cluster}", value=True):
+                if st.checkbox(f"{row['ds_documento_ocr'][0:1200]}", key=f"chk_{idx}_{cluster}", value=True):
                     selected_similars.append(idx)
             with col2:
                 st.write(f"Label: {row['label']}")
@@ -133,16 +163,4 @@ def app():
 
 if __name__ == "__main__":
     app()
-
-
-
-
-
-
-
-
-
-
-
-
 

@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from collections import Counter
-from utils import calculate_suggested_label
+from src.utilities.helpers import calculate_suggested_label
 import os
 
 PARQUET_FILE = "embeddings_labeled.parquet"
