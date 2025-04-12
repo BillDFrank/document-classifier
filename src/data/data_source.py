@@ -7,7 +7,8 @@ import torch
 from tqdm import tqdm
 
 MODEL_NAME = "ibm-granite/granite-embedding-30m-english"
-OUTPUT_FILE = "embeddings_labeled.parquet"
+OUTPUT_DIR = "data/processed/"  # Directory to save the output file
+OUTPUT_FILE = os.path.join(OUTPUT_DIR, "embeddings_labeled.parquet")
 BATCH_SIZE = 16  # Adjust based on your hardware
 
 
@@ -52,6 +53,10 @@ def app():
                                     ""] + list(df.columns))
 
         generate = False
+
+        # Ensure the output directory exists
+        if not os.path.exists(OUTPUT_DIR):
+            os.makedirs(OUTPUT_DIR)
 
         if os.path.exists(OUTPUT_FILE):
             st.warning(
