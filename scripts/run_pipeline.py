@@ -8,13 +8,13 @@ from src.clustering.cluster_mover import app as movecluster
 from src.clustering.cluster_splitter import app as splitcluster
 from src.clustering.clusterer import app as cluster
 from src.data.data_source import app as datasource
+from src.utilities.converter import app as converter
 import streamlit as st
 import sys
 import os
 
 # Ensure the root directory is in the Python path for module imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 
 # Configure Streamlit page settings
 st.set_page_config(page_title="Classification Platform", layout="wide")
@@ -32,7 +32,8 @@ app_selection = st.sidebar.radio("Select an App", [
     "Handle Outliers",
     "Move Clusters",
     "Classifier",
-    "Plot"
+    "Plot",
+    "Convert Parquet to CSV"
 ])
 
 if app_selection == "Datasource":
@@ -55,3 +56,5 @@ elif app_selection == "Classifier":
     classifier()
 elif app_selection == "Plot":
     plot()
+elif app_selection == "Convert Parquet to CSV":
+    converter()
