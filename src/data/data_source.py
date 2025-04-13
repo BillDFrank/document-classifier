@@ -5,9 +5,11 @@ import numpy as np
 from transformers import AutoTokenizer, AutoModel
 import torch
 from tqdm import tqdm
+import csv
+import io
 
 MODEL_NAME = "ibm-granite/granite-embedding-30m-english"
-OUTPUT_DIR = "data/processed/"  # Directory to save the output file
+OUTPUT_DIR = "data/processed"  # Directory to save the output file
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "embeddings_labeled.parquet")
 BATCH_SIZE = 16  # Adjust based on your hardware
 
@@ -31,13 +33,93 @@ def generate_embedding_batch(texts, tokenizer, model, device):
     return embeddings
 
 
+def detect_delimiter(file):
+    """Detect the delimiter of a CSV or TXT file using csv.Sniffer."""
+    file.seek(0)
+    sample = file.read(1024).decode("utf-8")
+    sniffer = csv.Sniffer()
+    delimiter = sniffer.sniff(sample).delimiter
+    file.seek(0)
+    return delimiter
+
+
+def preprocess_tab_delimited_file(file):
+    """Preprocess a tab-delimited file to ensure each row has exactly 2 fields."""
+    file.seek(0)
+    lines = file.read().decode("utf-8").splitlines()
+    cleaned_lines = []
+    problematic_rows = []
+
+    for i, line in enumerate(lines, 1):
+        # Skip empty lines
+        if not line.strip():
+            continue
+        # Split on tabs and strip any trailing tabs
+        fields = line.rstrip("\t").split("\t")
+        if len(fields) != 2:
+            problematic_rows.append((i, line))
+            # Join all fields after the first one as the message text
+            fields = [fields[0], "\t".join(fields[1:])]
+        cleaned_lines.append("\t".join(fields))
+
+    # Report problematic rows
+    if problematic_rows:
+        st.warning(
+            "Found rows with unexpected number of fields (should be 2). These have been fixed:")
+        for row_num, row in problematic_rows:
+            st.write(f"Line {row_num}: {row}")
+
+    # Create a new file-like object with the cleaned data
+    cleaned_data = "\n".join(cleaned_lines)
+    return io.StringIO(cleaned_data)
+
+
 def app():
     st.title("Embedding Generator with Labels")
 
-    uploaded_file = st.file_uploader("Select a CSV file", type="csv")
+    uploaded_file = st.file_uploader(
+        "Select a CSV, TXT, or XLSX file", type=["csv", "txt", "xlsx"])
 
     if uploaded_file:
-        df = pd.read_csv(uploaded_file)
+        file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+
+        delimiter = None
+        if file_extension in [".csv", ".txt"]:
+            delimiter_choice = st.selectbox(
+                "Select the delimiter (or auto-detect)",
+                ["Auto-detect", ", (comma)", "\t (tab)", "; (semicolon)"],
+                format_func=lambda x: x if x == "Auto-detect" else x.split()[
+                    0],
+                index=2 if file_extension == ".txt" else 0
+            )
+
+            if delimiter_choice == "Auto-detect":
+                try:
+                    delimiter = detect_delimiter(uploaded_file)
+                    st.info(f"Detected delimiter: '{delimiter}'")
+                except Exception as e:
+                    st.error(
+                        f"Could not detect delimiter: {str(e)}. Please select a delimiter manually.")
+                    st.stop()
+            else:
+                delimiter = delimiter_choice.split()[0]
+
+        try:
+            if file_extension in [".csv", ".txt"]:
+                # Preprocess the file to handle extra tabs
+                cleaned_file = preprocess_tab_delimited_file(uploaded_file)
+                df = pd.read_csv(cleaned_file, sep="\t",
+                                 names=["label", "text"])
+            elif file_extension == ".xlsx":
+                df = pd.read_excel(uploaded_file)
+            else:
+                st.error(
+                    "Unsupported file type. Please upload a CSV, TXT, or XLSX file.")
+                st.stop()
+        except Exception as e:
+            st.error(f"Error loading file: {str(e)}")
+            st.stop()
+
         st.success("File loaded successfully!")
         st.dataframe(df.head())
 
@@ -54,7 +136,6 @@ def app():
 
         generate = False
 
-        # Ensure the output directory exists
         if not os.path.exists(OUTPUT_DIR):
             os.makedirs(OUTPUT_DIR)
 
@@ -78,13 +159,11 @@ def app():
                     "⚠️ Select at least one column to generate embeddings.")
                 st.stop()
 
-            # Initialize progress bar and status
             progress_bar = st.progress(0)
             status_text = st.empty()
-            total_steps = 4  # Load model, prepare data, generate embeddings, save file
+            total_steps = 4
             current_step = 0
 
-            # Step 1: Load model
             status_text.text("🔄 Loading model...")
             progress_bar.progress(current_step / total_steps)
             tokenizer, model = load_model()
@@ -94,12 +173,9 @@ def app():
             current_step += 1
             progress_bar.progress(current_step / total_steps)
 
-            # Step 2: Prepare data
             status_text.text("📝 Preparing data...")
-            # Concatenate selected columns into a single text per row
             texts = df[embedding_columns].fillna(
                 "").astype(str).agg(" ".join, axis=1)
-            # Include label column in the text for embedding
             if label_column:
                 labels = df[label_column].fillna("").astype(str)
                 combined_texts = (texts + " " + labels).tolist()
@@ -110,7 +186,6 @@ def app():
             current_step += 1
             progress_bar.progress(current_step / total_steps)
 
-            # Step 3: Generate embeddings
             status_text.text("🧠 Generating embeddings...")
             data = []
             num_batches = (len(combined_texts) + BATCH_SIZE - 1) // BATCH_SIZE
@@ -120,7 +195,6 @@ def app():
                     batch_ids = ids[i:i + BATCH_SIZE]
                     batch_labels = labels[i:i + BATCH_SIZE]
 
-                    # Generate embeddings for the batch of combined texts
                     embeddings = generate_embedding_batch(
                         batch_texts, tokenizer, model, device)
 
@@ -129,10 +203,9 @@ def app():
                             "id_doc": id_doc,
                             "embedding": emb.astype(np.float32),
                             "combined_text": text,
-                            "label": str(label)  # Ensure label is a string
+                            "label": str(label)
                         })
 
-                    # Update progress within embedding step
                     batch_progress = (i + BATCH_SIZE) / len(combined_texts)
                     step_progress = (
                         current_step + batch_progress) / total_steps
@@ -144,10 +217,8 @@ def app():
             current_step += 1
             progress_bar.progress(current_step / total_steps)
 
-            # Step 4: Save file
             status_text.text("💾 Saving file...")
             result_df = pd.DataFrame(data)
-            # Ensure label column is string type
             result_df['label'] = result_df['label'].astype(str)
             result_df.to_parquet(OUTPUT_FILE, index=False)
             current_step += 1

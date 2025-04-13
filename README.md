@@ -43,6 +43,7 @@ The main entry point is scripts/run_pipeline.py, which orchestrates the document
 
 2. **Run the Pipeline**:
    ```bash
+   $env:PYTHONPATH = (Get-Location)
    streamlit run scripts\run_pipeline.py
    ```
 

@@ -6,7 +6,9 @@ from sklearn.preprocessing import OneHotEncoder
 from src.utilities.helpers import persist_labels, calculate_similarity, propose_cluster_names
 import os
 
-PARQUET_FILE = "embeddings_labeled.parquet"
+# Update the path to match the location where the embedding app saves the file
+PARQUET_FILE = os.path.join("data", "processed", "embeddings_labeled.parquet")
+
 
 def perform_clustering(df, n_clusters):
     """Performs K-Means clustering on the dataset."""
@@ -15,7 +17,7 @@ def perform_clustering(df, n_clusters):
 
     # Feature Engineering
     enc = OneHotEncoder(handle_unknown="ignore")
-    X = enc.fit_transform(df[['texto_agrupado']]).toarray()
+    X = enc.fit_transform(df[['combined_text']]).toarray()
 
     # Apply K-Means
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -23,24 +25,26 @@ def perform_clustering(df, n_clusters):
 
     return df, kmeans
 
-def app():
-    st.title("Cluster")
-    st.write("Sugere clusters para facilitar classificação.")
 
-    st.sidebar.title("Configurações")
-    n_similares = st.sidebar.slider("Número de Elementos Similares", 1, 30, 10)
-    n_clusters = st.sidebar.slider("Número de Clusters", 2, 50, 10)
-    submit_button = st.sidebar.button("Submeter")
+def app():
+    st.title("Clustering")
+    st.write("Suggests clusters to facilitate classification.")
+
+    st.sidebar.title("Settings")
+    n_similares = st.sidebar.slider("Number of Similar Elements", 1, 30, 10)
+    n_clusters = st.sidebar.slider("Number of Clusters", 2, 50, 10)
+    submit_button = st.sidebar.button("Submit")
 
     # Load DataFrame from Parquet file
     if "df" not in st.session_state:
         if not os.path.exists(PARQUET_FILE):
-            st.error(f"Arquivo '{PARQUET_FILE}' não encontrado. Gere os embeddings primeiro.")
+            st.error(
+                f"File '{PARQUET_FILE}' not found. Generate the embeddings first.")
             return
         else:
             st.session_state.df = pd.read_parquet(PARQUET_FILE)
 
-    # Perform clustering only when "Submeter" is clicked
+    # Perform clustering only when "Submit" is clicked
     if submit_button:
         df = st.session_state.df
         df, kmeans = perform_clustering(df, n_clusters)
@@ -49,7 +53,7 @@ def app():
             df = calculate_similarity(df, n_clusters)
             st.session_state.df = df
             st.session_state.cluster = 0
-            st.success("Clusterização concluída com sucesso!")
+            st.success("Clustering completed successfully!")
 
     # If clustering has been performed, show the labeling interface
     if "cluster" in st.session_state:
@@ -61,12 +65,13 @@ def app():
         df = df[df['label'] == ""]
         cluster = st.session_state.cluster
 
-        st.header("Parâmetros")
-        st.write(f"Exibindo {n_similares} elementos similares")
-        st.write(f"Cluster: {cluster+1} de {n_clusters}")
+        st.header("Parameters")
+        st.write(f"Displaying {n_similares} similar elements")
+        st.write(f"Cluster: {cluster+1} of {n_clusters}")
         labels_count = df.shape[0]
         empty_labels_count = df['label'].eq("").sum()
-        st.write(f"Número de elementos sem rótulo: {empty_labels_count}/{labels_count}")
+        st.write(
+            f"Number of elements without a label: {empty_labels_count}/{labels_count}")
 
         next_back_cols = st.columns([1, 1, 2])
         with next_back_cols[0]:
@@ -81,45 +86,47 @@ def app():
         similar_docs = df[(df['cluster'] == cluster) & (df['label'] == "")]
         similar_docs = similar_docs.head(n_similares)
 
-        st.header("Seleção de Rótulos dos Clusters")
+        st.header("Selection of Cluster Labels")
 
-        if 'rótulos_existentes' not in st.session_state:
+        if 'existing_labels' not in st.session_state:
             if len(distinct_labels) < 2:
-                st.session_state.rótulos_existentes = [
-                    "SIGILOSO", "NAO SIGILOSO"
+                st.session_state.existing_labels = [
+                    "CONFIDENTIAL", "NOT CONFIDENTIAL"
                 ]
-                st.session_state.rótulos_existentes.sort()
+                st.session_state.existing_labels.sort()
             else:
-                st.session_state.rótulos_existentes = distinct_labels
+                st.session_state.existing_labels = distinct_labels
 
         label_cols = st.columns([2, 3, 2])
         with label_cols[0]:
-            selected_label = st.selectbox("Selecione um rótulo", st.session_state.rótulos_existentes)
+            selected_label = st.selectbox(
+                "Select a label", st.session_state.existing_labels)
         with label_cols[1]:
-            new_label = st.text_input("Adicionar Novo Rótulo")
+            new_label = st.text_input("Add New Label")
         with label_cols[2]:
-            if st.button("Adicionar Rótulo"):
-                if new_label and new_label not in st.session_state.rótulos_existentes:
-                    st.session_state.rótulos_existentes.append(new_label)
+            if st.button("Add Label"):
+                if new_label and new_label not in st.session_state.existing_labels:
+                    st.session_state.existing_labels.append(new_label)
                     selected_label = new_label
-                    st.success(f"Rótulo '{new_label}' adicionado com sucesso.")
+                    st.success(f"Label '{new_label}' added successfully.")
 
-        st.header("Elementos Similares do Cluster")
+        st.header("Similar Elements in the Cluster")
 
         selected_similars = []
         for idx, row in similar_docs.iterrows():
-            if st.checkbox(f"{row['texto_agrupado'][0:1000]}", key=idx, value=True):
+            if st.checkbox(f"{row['combined_text'][0:1000]}", key=idx, value=True):
                 selected_similars.append(idx)
 
-        if st.button("ROTULAR"):
+        if st.button("LABEL"):
             for idx in selected_similars:
                 st.session_state.df.at[idx, 'label'] = selected_label
 
             try:
                 st.session_state.df.to_parquet(PARQUET_FILE, index=False)
-                st.success("Elementos rotulados com sucesso e arquivo atualizado!")
+                st.success("Elements labeled successfully and file updated!")
             except Exception as e:
-                st.error(f"Erro ao salvar arquivo: {e}")
+                st.error(f"Error saving file: {e}")
+
 
 if __name__ == "__main__":
     app()
