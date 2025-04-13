@@ -178,13 +178,14 @@ def app():
             progress_bar.progress(current_step / total_steps)
 
             status_text.text("📝 Preparing data...")
+            # Generate the text for embeddings using only the selected embedding columns
             texts = df[embedding_columns].fillna(
                 "").astype(str).agg(" ".join, axis=1)
+            combined_texts = texts.tolist()
+            # Keep the labels separate for the output DataFrame
             if label_column:
                 labels = df[label_column].fillna("").astype(str)
-                combined_texts = (texts + " " + labels).tolist()
             else:
-                combined_texts = texts.tolist()
                 labels = pd.Series(["" for _ in range(len(df))])
             ids = df[id_column].tolist() if id_column else list(range(len(df)))
             current_step += 1
