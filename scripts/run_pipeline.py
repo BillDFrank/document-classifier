@@ -17,10 +17,10 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Configure Streamlit page settings
-st.set_page_config(page_title="Classification Platform", layout="wide")
+st.set_page_config(
+    page_title="Text Classifier and Clustering", layout="wide")
 
-st.sidebar.title("Classification Platform")
-st.title("Classification Platform")
+st.sidebar.title("App Selection")
 
 app_selection = st.sidebar.radio("Select an App", [
     "Datasource",
