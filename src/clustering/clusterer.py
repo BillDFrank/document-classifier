@@ -33,6 +33,9 @@ def app():
     st.sidebar.title("Settings")
     n_similares = st.sidebar.slider("Number of Similar Elements", 1, 30, 10)
     n_clusters = st.sidebar.slider("Number of Clusters", 2, 50, 10)
+    # Add a checkbox to toggle including labeled items
+    include_labeled = st.sidebar.checkbox("Include Items with Labels", value=False,
+                                          help="If checked, items with existing labels will be included in the labeling interface.")
     submit_button = st.sidebar.button("Submit")
 
     # Load DataFrame from Parquet file
@@ -62,14 +65,20 @@ def app():
         distinct_labels = [x for x in distinct_labels if x is not None]
         distinct_labels.sort()
         df['label'] = df['label'].fillna("")
-        df = df[df['label'] == ""]
+
+        # Conditionally filter the DataFrame based on the toggle
+        if not include_labeled:
+            df_filtered = df[df['label'] == ""]
+        else:
+            df_filtered = df  # Include all items, labeled or not
+
         cluster = st.session_state.cluster
 
         st.header("Parameters")
         st.write(f"Displaying {n_similares} similar elements")
         st.write(f"Cluster: {cluster+1} of {n_clusters}")
-        labels_count = df.shape[0]
-        empty_labels_count = df['label'].eq("").sum()
+        labels_count = df_filtered.shape[0]
+        empty_labels_count = df_filtered['label'].eq("").sum()
         st.write(
             f"Number of elements without a label: {empty_labels_count}/{labels_count}")
 
@@ -83,7 +92,12 @@ def app():
                 st.session_state.cluster = (cluster + 1) % n_clusters
                 cluster = st.session_state.cluster
 
-        similar_docs = df[(df['cluster'] == cluster) & (df['label'] == "")]
+        # Select similar documents based on the toggle
+        if not include_labeled:
+            similar_docs = df_filtered[(df_filtered['cluster'] == cluster) & (
+                df_filtered['label'] == "")]
+        else:
+            similar_docs = df_filtered[df_filtered['cluster'] == cluster]
         similar_docs = similar_docs.head(n_similares)
 
         st.header("Selection of Cluster Labels")
@@ -114,7 +128,9 @@ def app():
 
         selected_similars = []
         for idx, row in similar_docs.iterrows():
-            if st.checkbox(f"{row['combined_text'][0:1000]}", key=idx, value=True):
+            # Display the label (if any) alongside the text for clarity
+            label_display = f" (Label: {row['label']})" if row['label'] else ""
+            if st.checkbox(f"{row['combined_text'][0:1000]}{label_display}", key=idx, value=True):
                 selected_similars.append(idx)
 
         if st.button("LABEL"):
