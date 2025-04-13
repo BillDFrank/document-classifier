@@ -85,6 +85,10 @@ def app():
     if 'existing_labels' not in st.session_state:
         st.session_state.existing_labels = label_types
 
+    # Reset df on page load to avoid using stale data
+    if not submit_button:
+        st.session_state.df = None
+
     if submit_button:
         df = pd.read_parquet(parquet_file)
         if 'label' not in df.columns:
@@ -106,7 +110,7 @@ def app():
         st.session_state.cluster = 0
         st.session_state.active_state = active_state
 
-    if 'df' in st.session_state and st.session_state.df is not None:
+        # Display logic moved inside submit_button block
         df = st.session_state.df
         distinct_labels = df['label'].unique().tolist()
         distinct_labels = [x for x in distinct_labels if x != ""]
