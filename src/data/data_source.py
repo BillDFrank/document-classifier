@@ -10,7 +10,6 @@ import io
 
 MODEL_NAME = "ibm-granite/granite-embedding-30m-english"
 OUTPUT_DIR = "data/processed"  # Directory to save the output file
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "embeddings_labeled.parquet")
 BATCH_SIZE = 16  # Adjust based on your hardware
 
 
@@ -81,6 +80,11 @@ def app():
         "Select a CSV, TXT, or XLSX file", type=["csv", "txt", "xlsx"])
 
     if uploaded_file:
+        # Extract the base name of the uploaded file (without extension)
+        file_base_name = os.path.splitext(uploaded_file.name)[0]
+        # Define the output file name based on the uploaded file's name
+        output_file = os.path.join(OUTPUT_DIR, f"{file_base_name}.parquet")
+
         file_extension = os.path.splitext(uploaded_file.name)[1].lower()
 
         delimiter = None
@@ -139,9 +143,9 @@ def app():
         if not os.path.exists(OUTPUT_DIR):
             os.makedirs(OUTPUT_DIR)
 
-        if os.path.exists(OUTPUT_FILE):
+        if os.path.exists(output_file):
             st.warning(
-                f"⚠️ The file '{OUTPUT_FILE}' already exists. Do you want to overwrite it?")
+                f"⚠️ The file '{output_file}' already exists. Do you want to overwrite it?")
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("Yes, overwrite file"):
@@ -220,11 +224,11 @@ def app():
             status_text.text("💾 Saving file...")
             result_df = pd.DataFrame(data)
             result_df['label'] = result_df['label'].astype(str)
-            result_df.to_parquet(OUTPUT_FILE, index=False)
+            result_df.to_parquet(output_file, index=False)
             current_step += 1
             progress_bar.progress(current_step / total_steps)
 
-            status_text.text(f"✅ File saved successfully as: `{OUTPUT_FILE}`")
+            status_text.text(f"✅ File saved successfully as: `{output_file}`")
             st.write(result_df.head())
 
 
