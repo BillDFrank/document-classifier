@@ -13,3 +13,4 @@ tqdm==4.67.1
 transformers==4.51.2
 streamlit
 openpyxl
+opensearch-py

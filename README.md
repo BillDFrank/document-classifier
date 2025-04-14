@@ -34,7 +34,7 @@ This project is a Python-based system for document classification, clustering, a
 
 ## Usage
 
-The main entry point is scripts/run_pipeline.py, which orchestrates the document classification and analysis pipeline.
+The main entry point is run_pipeline.py, which orchestrates the document classification and analysis pipeline.
 
 1. **Prepare Data**:
 
@@ -43,8 +43,7 @@ The main entry point is scripts/run_pipeline.py, which orchestrates the document
 
 2. **Run the Pipeline**:
    ```bash
-   $env:PYTHONPATH = (Get-Location)
-   streamlit run scripts\run_pipeline.py
+   streamlit run run_pipeline.py
    ```
 
 Outputs (e.g., plots, models) are saved in outputs/ and models/.
@@ -62,8 +61,8 @@ pip install -r requirements.txt
 ````text
 document-classifier/
 ├── data/
-│   ├── raw/               # Raw data
-│   └── processed/         # Processed data
+│   ├── raw/               
+│   └── processed/         
 ├── src/
 │   ├── classification/
 │   │   └── classifier.py
@@ -88,8 +87,7 @@ document-classifier/
 │   └── init.py
 ├── notebooks/
 │   └── tests.ipynb
-├── scripts/
-│   └── run_pipeline.py
+├── run_pipeline.py
 ├── models/
 ├── outputs/
 ├── tests/
