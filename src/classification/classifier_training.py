@@ -206,7 +206,14 @@ def app():
         model_filename = f"{parquet_base_name}_{selected_model.replace(' ', '')}.pkl"
         model_path = os.path.join(MODEL_DIR, model_filename)
         joblib.dump(model, model_path)
+
+        # Save the LabelEncoder
+        label_encoder_filename = f"{parquet_base_name}_{selected_model.replace(' ', '')}_label_encoder.pkl"
+        label_encoder_path = os.path.join(MODEL_DIR, label_encoder_filename)
+        joblib.dump(label_encoder, label_encoder_path)
+
         st.write(f"Model saved as: {model_path}")
+        st.write(f"LabelEncoder saved as: {label_encoder_path}")
 
         # Compute average metrics
         avg_accuracy = np.mean(accuracies)

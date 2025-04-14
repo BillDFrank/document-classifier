@@ -26,7 +26,7 @@ def app():
         return
 
     # List available models
-    model_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.pkl')]
+    model_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.pkl') and not f.endswith('_label_encoder.pkl')]
     if not model_files:
         st.error("No models found in models directory. Train a model first using Classifier Training.")
         return
@@ -69,6 +69,15 @@ def app():
             st.error(f"Error loading model: {e}")
             return
 
+        # Load the corresponding LabelEncoder
+        label_encoder_filename = f"{os.path.splitext(selected_model_file)[0]}_label_encoder.pkl"
+        label_encoder_path = os.path.join(MODEL_DIR, label_encoder_filename)
+        try:
+            label_encoder = joblib.load(label_encoder_path)
+        except Exception as e:
+            st.error(f"Error loading LabelEncoder: {e}")
+            return
+
         # Prepare features
         X_unlabeled = np.array(df_unlabeled['embedding'].tolist())
 
@@ -83,17 +92,9 @@ def app():
             y_pred = model.predict(X_unlabeled)
             confidences = np.ones(len(y_pred))  # Assign confidence of 1.0 (no filtering possible)
 
-        # Determine if the model was trained with LabelEncoder (try to extract classes_)
+        # Decode the predicted labels using the LabelEncoder
         try:
-            # Assume the model was trained with encoded labels and has an associated LabelEncoder
-            # In practice, you might need to save the LabelEncoder alongside the model
-            # For now, we'll infer the classes from the model's classes_ attribute if available
-            if hasattr(model, "classes_"):
-                class_names = model.classes_
-            else:
-                # Fallback: Assume binary classification with 0 and 1, mapping to "ham" and "spam"
-                class_names = np.array(["ham", "spam"])  # Adjust based on your dataset
-            y_pred_labels = class_names[y_pred]
+            y_pred_labels = label_encoder.inverse_transform(y_pred)
         except Exception as e:
             st.error(f"Error decoding labels: {e}")
             return
