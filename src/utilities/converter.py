@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 
-
 def app():
     """Handles the conversion of a Parquet file to CSV."""
     st.title("Convert Parquet to CSV")
@@ -18,6 +17,31 @@ def app():
             st.success("Parquet file loaded successfully!")
             st.write("Preview of the loaded file:")
             st.dataframe(df.head())
+
+            # Display DataFrame statistics
+            st.write("### File Statistics")
+            # Total number of columns
+            total_columns = len(df.columns)
+            st.write(f"- **Total Number of Columns**: {total_columns}")
+
+            # Check if 'label' column exists, and calculate label statistics
+            if 'label' in df.columns:
+                # Ensure labels are treated as strings and handle NaN/None
+                df['label'] = df['label'].fillna("").astype(str)
+                # Total number of rows with labels (non-empty strings)
+                labeled_rows = df[df['label'] != ""].shape[0]
+                st.write(f"- **Total Number of Rows with Labels**: {labeled_rows}")
+
+                # Count of each label (excluding empty strings)
+                label_counts = df[df['label'] != ""]['label'].value_counts()
+                if not label_counts.empty:
+                    st.write("- **Label Distribution**:")
+                    for label, count in label_counts.items():
+                        st.write(f"  - {label}: {count}")
+                else:
+                    st.write("- **Label Distribution**: No labels found.")
+            else:
+                st.write("- **Label Information**: No 'label' column found in the file.")
 
             # Convert DataFrame to CSV
             csv_buffer = io.StringIO()
@@ -38,3 +62,6 @@ def app():
             )
         except Exception as e:
             st.error(f"Error processing the Parquet file: {e}")
+
+if __name__ == "__main__":
+    app()

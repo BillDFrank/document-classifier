@@ -3,12 +3,11 @@ import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder
-from src.utilities.helpers import persist_labels, calculate_similarity, propose_cluster_names
+from src.utilities.helpers import persist_labels, propose_cluster_names
 import os
 
 # Directory where Parquet files are saved
 PARQUET_DIR = os.path.join("data", "processed")
-
 
 def perform_clustering(df, n_clusters):
     """Performs K-Means clustering on the dataset."""
@@ -25,7 +24,6 @@ def perform_clustering(df, n_clusters):
 
     return df, kmeans
 
-
 def app():
     st.title("Clustering")
     st.write("Suggests clusters to facilitate classification.")
@@ -34,15 +32,12 @@ def app():
 
     # List all .parquet files in the data/processed directory
     if not os.path.exists(PARQUET_DIR):
-        st.error(
-            f"Directory '{PARQUET_DIR}' not found. Generate embeddings first.")
+        st.error(f"Directory '{PARQUET_DIR}' not found. Generate embeddings first.")
         return
 
-    parquet_files = [f for f in os.listdir(
-        PARQUET_DIR) if f.endswith(".parquet")]
+    parquet_files = [f for f in os.listdir(PARQUET_DIR) if f.endswith(".parquet")]
     if not parquet_files:
-        st.error(
-            f"No Parquet files found in '{PARQUET_DIR}'. Generate embeddings first.")
+        st.error(f"No Parquet files found in '{PARQUET_DIR}'. Generate embeddings first.")
         return
 
     # Let the user select a Parquet file
@@ -68,8 +63,7 @@ def app():
     # Load DataFrame from the selected Parquet file
     if "df" not in st.session_state:
         if not os.path.exists(parquet_file):
-            st.error(
-                f"File '{parquet_file}' not found. Generate the embeddings first.")
+            st.error(f"File '{parquet_file}' not found. Generate the embeddings first.")
             return
         else:
             st.session_state.df = pd.read_parquet(parquet_file)
@@ -80,10 +74,17 @@ def app():
         df, kmeans = perform_clustering(df, n_clusters)
 
         if df is not None:
-            df = calculate_similarity(df, n_clusters)
             st.session_state.df = df
-            st.session_state.cluster = 0
-            st.success("Clustering completed successfully!")
+            # Ensure cluster is initialized
+            if 'cluster' not in st.session_state:
+                st.session_state.cluster = 0
+            # Save the clustered DataFrame to the .parquet file
+            try:
+                st.session_state.df.to_parquet(parquet_file, index=False)
+                st.success("Clustering completed and file updated successfully!")
+            except Exception as e:
+                st.error(f"Error saving file: {e}")
+                return
 
     # If clustering has been performed, show the labeling interface
     if "cluster" in st.session_state:
@@ -106,8 +107,7 @@ def app():
         st.write(f"Cluster: {cluster+1} of {n_clusters}")
         labels_count = df_filtered.shape[0]
         empty_labels_count = df_filtered['label'].eq("").sum()
-        st.write(
-            f"Number of elements without a label: {empty_labels_count}/{labels_count}")
+        st.write(f"Number of elements without a label: {empty_labels_count}/{labels_count}")
 
         next_back_cols = st.columns([1, 1, 2])
         with next_back_cols[0]:
@@ -121,8 +121,7 @@ def app():
 
         # Select similar documents based on the toggle
         if not include_labeled:
-            similar_docs = df_filtered[(df_filtered['cluster'] == cluster) & (
-                df_filtered['label'] == "")]
+            similar_docs = df_filtered[(df_filtered['cluster'] == cluster) & (df_filtered['label'] == "")]
         else:
             similar_docs = df_filtered[df_filtered['cluster'] == cluster]
         similar_docs = similar_docs.head(n_similares)
@@ -140,8 +139,7 @@ def app():
 
         label_cols = st.columns([2, 3, 2])
         with label_cols[0]:
-            selected_label = st.selectbox(
-                "Select a label", st.session_state.existing_labels)
+            selected_label = st.selectbox("Select a label", st.session_state.existing_labels)
         with label_cols[1]:
             new_label = st.text_input("Add New Label")
         with label_cols[2]:
@@ -155,9 +153,10 @@ def app():
 
         selected_similars = []
         for idx, row in similar_docs.iterrows():
-            # Display the label (if any) alongside the text for clarity
+            # Display the id_doc, combined_text, and label (if available)
             label_display = f" (Label: {row['label']})" if row['label'] else ""
-            if st.checkbox(f"{row['combined_text'][0:1000]}{label_display}", key=idx, value=True):
+            display_text = f"[{row['id_doc']}] - {row['combined_text'][0:1000]}{label_display}"
+            if st.checkbox(display_text, key=idx, value=True):
                 selected_similars.append(idx)
 
         if st.button("LABEL"):
@@ -167,9 +166,10 @@ def app():
             try:
                 st.session_state.df.to_parquet(parquet_file, index=False)
                 st.success("Elements labeled successfully and file updated!")
+                # Move to the next cluster after labeling
+                st.session_state.cluster = (st.session_state.cluster + 1) % n_clusters
             except Exception as e:
                 st.error(f"Error saving file: {e}")
-
 
 if __name__ == "__main__":
     app()
