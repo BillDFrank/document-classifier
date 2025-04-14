@@ -116,6 +116,11 @@ def app():
 
         st.write(f"Generated predictions for {len(results_df)} rows with confidence >= {min_confidence}.")
 
+        # Display the number of predictions for each class
+        st.write("### Prediction Distribution by Class")
+        class_counts = results_df['label'].value_counts().to_dict()
+        st.write(class_counts)
+
         # Save predictions to CSV
         parquet_base_name = os.path.splitext(selected_file)[0]
         model_name = os.path.splitext(selected_model_file)[0].split('_')[-1]
