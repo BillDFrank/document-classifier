@@ -1,4 +1,5 @@
 from src.visualization.plotter import app as plot
+from src.classification.classifier_training import app as classifier_training
 from src.classification.classifier import app as classifier
 from src.analysis.outliers import app as outliers
 from src.search.auto_suggestion import app as auto_suggestion
@@ -31,6 +32,7 @@ app_selection = st.sidebar.radio("Select an App", [
     "Split Cluster",
     "Handle Outliers",
     "Move Clusters",
+    "Classifier - Training",
     "Classifier",
     "Plot",
     "Convert Parquet to CSV"
@@ -52,6 +54,8 @@ elif app_selection == "Handle Outliers":
     outliers()
 elif app_selection == "Move Clusters":
     movecluster()
+elif app_selection == "Classifier - Training":
+    classifier_training()
 elif app_selection == "Classifier":
     classifier()
 elif app_selection == "Plot":
