@@ -14,3 +14,4 @@ transformers==4.51.2
 streamlit
 openpyxl
 opensearch-py
+plotly
