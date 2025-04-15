@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import OneHotEncoder
-from src.utilities.helpers import persist_labels, propose_cluster_names
 import os
 
 # Directory where Parquet files are saved
@@ -14,7 +13,7 @@ def perform_clustering(df, n_clusters):
     if df.empty:
         return None, None
 
-    # Feature Engineering
+    # Feature Engineering: One-hot encode the combined_text
     enc = OneHotEncoder(handle_unknown="ignore")
     X = enc.fit_transform(df[['combined_text']]).toarray()
 
@@ -52,7 +51,6 @@ def app():
 
     n_similares = st.sidebar.slider("Number of Similar Elements", 1, 30, 10)
     n_clusters = st.sidebar.slider("Number of Clusters", 2, 50, 10)
-    # Add a checkbox to toggle including labeled items
     include_labeled = st.sidebar.checkbox(
         "Include Items with Labels",
         value=False,
@@ -60,24 +58,27 @@ def app():
     )
     submit_button = st.sidebar.button("Submit")
 
-    # Load DataFrame from the selected Parquet file
+    # Load DataFrame from the selected Parquet file into session state if not already loaded
     if "df" not in st.session_state:
         if not os.path.exists(parquet_file):
             st.error(f"File '{parquet_file}' not found. Generate the embeddings first.")
             return
-        else:
-            st.session_state.df = pd.read_parquet(parquet_file)
+        st.session_state.df = pd.read_parquet(parquet_file)
 
-    # Perform clustering only when "Submit" is clicked
+    # Perform clustering when "Submit" is clicked
     if submit_button:
-        df = st.session_state.df
+        df = st.session_state.df.copy()
         df, kmeans = perform_clustering(df, n_clusters)
 
         if df is not None:
             st.session_state.df = df
-            # Ensure cluster is initialized
+            # Initialize cluster index if not already set
             if 'cluster' not in st.session_state:
                 st.session_state.cluster = 0
+            # Display cluster distribution
+            st.write("### Cluster Distribution")
+            cluster_counts = df['cluster'].value_counts().sort_index().to_dict()
+            st.write({f"Cluster {k+1}": v for k, v in cluster_counts.items()})
             # Save the clustered DataFrame to the .parquet file
             try:
                 st.session_state.df.to_parquet(parquet_file, index=False)
@@ -87,11 +88,13 @@ def app():
                 return
 
     # If clustering has been performed, show the labeling interface
-    if "cluster" in st.session_state:
+    if "cluster" in st.session_state.df.columns:
         df = st.session_state.df
-        distinct_labels = df['label'].unique().tolist()
-        distinct_labels = [x for x in distinct_labels if x is not None]
+        # Get distinct labels from the DataFrame
+        distinct_labels = [x for x in df['label'].unique() if pd.notnull(x) and x.strip() != ""]
         distinct_labels.sort()
+
+        # Replace NaN or empty labels with an empty string for consistency
         df['label'] = df['label'].fillna("")
 
         # Conditionally filter the DataFrame based on the toggle
@@ -100,53 +103,60 @@ def app():
         else:
             df_filtered = df  # Include all items, labeled or not
 
+        # Get the current cluster index
+        if 'cluster' not in st.session_state:
+            st.session_state.cluster = 0
         cluster = st.session_state.cluster
 
+        # Display clustering parameters
         st.header("Parameters")
-        st.write(f"Displaying {n_similares} similar elements")
+        st.write(f"Displaying up to {n_similares} similar elements")
         st.write(f"Cluster: {cluster+1} of {n_clusters}")
         labels_count = df_filtered.shape[0]
         empty_labels_count = df_filtered['label'].eq("").sum()
         st.write(f"Number of elements without a label: {empty_labels_count}/{labels_count}")
 
+        # Navigation buttons for clusters
         next_back_cols = st.columns([1, 1, 2])
         with next_back_cols[0]:
             if st.button("BACK"):
                 st.session_state.cluster = (cluster - 1) % n_clusters
-                cluster = st.session_state.cluster
         with next_back_cols[1]:
             if st.button("NEXT"):
                 st.session_state.cluster = (cluster + 1) % n_clusters
-                cluster = st.session_state.cluster
+
+        # Update cluster index after button clicks
+        cluster = st.session_state.cluster
 
         # Select similar documents based on the toggle
         if not include_labeled:
             similar_docs = df_filtered[(df_filtered['cluster'] == cluster) & (df_filtered['label'] == "")]
         else:
             similar_docs = df_filtered[df_filtered['cluster'] == cluster]
+
+        # Warn if the cluster is empty or has fewer documents than requested
+        if similar_docs.empty:
+            st.warning(f"Cluster {cluster+1} is empty. Try navigating to another cluster or adjust the number of clusters.")
+        elif len(similar_docs) < n_similares:
+            st.info(f"Cluster {cluster+1} has only {len(similar_docs)} documents, fewer than the requested {n_similares}.")
+
         similar_docs = similar_docs.head(n_similares)
 
+        # Labeling interface
         st.header("Selection of Cluster Labels")
 
-        if 'existing_labels' not in st.session_state:
-            if len(distinct_labels) < 2:
-                st.session_state.existing_labels = [
-                    "CONFIDENTIAL", "NOT CONFIDENTIAL"
-                ]
-                st.session_state.existing_labels.sort()
-            else:
-                st.session_state.existing_labels = distinct_labels
+        # Use distinct labels from the DataFrame
+        existing_labels = distinct_labels if distinct_labels else []
 
         label_cols = st.columns([2, 3, 2])
         with label_cols[0]:
-            selected_label = st.selectbox("Select a label", st.session_state.existing_labels)
+            selected_label = st.selectbox("Select a label", existing_labels) if existing_labels else st.text_input("Enter a label")
         with label_cols[1]:
             new_label = st.text_input("Add New Label")
         with label_cols[2]:
             if st.button("Add Label"):
-                if new_label and new_label not in st.session_state.existing_labels:
-                    st.session_state.existing_labels.append(new_label)
-                    selected_label = new_label
+                if new_label and new_label not in existing_labels:
+                    existing_labels.append(new_label)
                     st.success(f"Label '{new_label}' added successfully.")
 
         st.header("Similar Elements in the Cluster")
@@ -161,13 +171,11 @@ def app():
 
         if st.button("LABEL"):
             for idx in selected_similars:
-                st.session_state.df.at[idx, 'label'] = selected_label
+                st.session_state.df.at[idx, 'label'] = selected_label if existing_labels else new_label
 
             try:
                 st.session_state.df.to_parquet(parquet_file, index=False)
                 st.success("Elements labeled successfully and file updated!")
-                # Move to the next cluster after labeling
-                st.session_state.cluster = (st.session_state.cluster + 1) % n_clusters
             except Exception as e:
                 st.error(f"Error saving file: {e}")
 
