@@ -14,6 +14,8 @@ import streamlit as st
 import sys
 import os
 
+#teste cesar
+
 # Ensure the root directory is in the Python path for module imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
