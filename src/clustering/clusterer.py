@@ -79,17 +79,16 @@ def app():
             st.write("### Cluster Distribution")
             cluster_counts = df['cluster'].value_counts().sort_index().to_dict()
             st.write({f"Cluster {k+1}": v for k, v in cluster_counts.items()})
-            # Save the clustered DataFrame to the .parquet file
-            try:
-                st.session_state.df.to_parquet(parquet_file, index=False)
-                st.success("Clustering completed and file updated successfully!")
-            except Exception as e:
-                st.error(f"Error saving file: {e}")
-                return
+            st.success("Clustering completed successfully! Use the labeling interface below to update labels.")
+        else:
+            st.error("Clustering failed. Please check the data and try again.")
+            return
 
     # If clustering has been performed, show the labeling interface
     if "cluster" in st.session_state.df.columns:
         df = st.session_state.df
+        # Ensure the label column is of string type
+        df['label'] = df['label'].astype(str)
         # Get distinct labels from the DataFrame
         distinct_labels = [x for x in df['label'].unique() if pd.notnull(x) and x.strip() != ""]
         distinct_labels.sort()
@@ -170,14 +169,26 @@ def app():
                 selected_similars.append(idx)
 
         if st.button("LABEL"):
-            for idx in selected_similars:
-                st.session_state.df.at[idx, 'label'] = selected_label if existing_labels else new_label
+            if selected_similars:
+                # Update labels in the in-memory DataFrame
+                label_to_apply = selected_label if existing_labels else new_label
+                for idx in selected_similars:
+                    st.session_state.df.at[idx, 'label'] = label_to_apply
 
-            try:
-                st.session_state.df.to_parquet(parquet_file, index=False)
-                st.success("Elements labeled successfully and file updated!")
-            except Exception as e:
-                st.error(f"Error saving file: {e}")
+                # Update only the modified rows in the Parquet file
+                updated_rows = st.session_state.df.loc[selected_similars, ['label']]
+                try:
+                    # Load the existing Parquet file
+                    existing_df = pd.read_parquet(parquet_file)
+                    # Update the specific rows
+                    existing_df.update(updated_rows)
+                    # Save the updated DataFrame back to the Parquet file
+                    existing_df.to_parquet(parquet_file, index=False)
+                    st.success("Elements labeled successfully and file updated!")
+                except Exception as e:
+                    st.error(f"Error saving file: {e}")
+            else:
+                st.warning("No elements selected for labeling.")
 
 if __name__ == "__main__":
     app()
