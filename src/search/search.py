@@ -68,13 +68,28 @@ def app():
     submit_button = st.sidebar.button("Search and Group")
 
     # Initialize session state variables
-    if 'full_df' not in st.session_state:
-        # Load the full DataFrame at the start
+    if 'full_df' not in st.session_state or st.session_state.get('last_parquet_file') != parquet_file:
+        # Load the full DataFrame at the start or when the parquet file changes
         full_df = pd.read_parquet(parquet_file)
+        # Ensure combined_text is a string column
+        if 'combined_text' in full_df.columns:
+            full_df['combined_text'] = full_df['combined_text'].astype(str)
+        else:
+            st.error("The 'combined_text' column is missing from the Parquet file.")
+            return
+        # Ensure label is a string column
         if 'label' not in full_df.columns:
             full_df['label'] = ""
-        full_df['label'] = full_df['label'].fillna("")
+        full_df['label'] = full_df['label'].astype(str).fillna("")
+        # Filter out rows with empty or whitespace-only combined_text
+        full_df = full_df[full_df['combined_text'].str.strip() != '']
+        if full_df.empty:
+            st.error("No non-empty rows found in the Parquet file.")
+            return
+        # Update session state
         st.session_state.full_df = full_df
+        st.session_state.last_parquet_file = parquet_file
+
     if 'filtered_df' not in st.session_state:
         st.session_state.filtered_df = None
     if 'cluster' not in st.session_state:
@@ -82,7 +97,7 @@ def app():
     if 'n_clusters' not in st.session_state:
         st.session_state.n_clusters = 1
     if 'existing_labels' not in st.session_state:
-        distinct_labels = [x for x in st.session_state.full_df['label'].unique() if pd.notnull(x) and x.strip() != ""]
+        distinct_labels = [x for x in st.session_state.full_df['label'].unique() if x.strip() != ""]
         distinct_labels.sort()
         st.session_state.existing_labels = distinct_labels
     if 'last_search_params' not in st.session_state:
@@ -96,48 +111,39 @@ def app():
         'n_similares': n_similares
     }
 
-    # Reset filtered DataFrame only if search parameters have changed and the user clicks "Search and Group"
-    if submit_button:
-        # Always reset when the user explicitly clicks "Search and Group"
+    # Reset filtered DataFrame if search parameters have changed or user clicks "Search and Group"
+    if submit_button or (st.session_state.last_search_params != current_search_params and st.session_state.filtered_df is not None):
         st.session_state.filtered_df = None
         # Reload the full DataFrame if the parquet file has changed
         if st.session_state.last_search_params is None or st.session_state.last_search_params['parquet_file'] != parquet_file:
             full_df = pd.read_parquet(parquet_file)
+            if 'combined_text' in full_df.columns:
+                full_df['combined_text'] = full_df['combined_text'].astype(str)
+            else:
+                st.error("The 'combined_text' column is missing from the Parquet file.")
+                return
             if 'label' not in full_df.columns:
                 full_df['label'] = ""
-            full_df['label'] = full_df['label'].fillna("")
+            full_df['label'] = full_df['label'].astype(str).fillna("")
+            full_df = full_df[full_df['combined_text'].str.strip() != '']
+            if full_df.empty:
+                st.error("No non-empty rows found in the Parquet file.")
+                return
             st.session_state.full_df = full_df
             # Update existing_labels with labels from the new DataFrame
-            distinct_labels = [x for x in full_df['label'].unique() if pd.notnull(x) and x.strip() != ""]
+            distinct_labels = [x for x in full_df['label'].unique() if x.strip() != ""]
             distinct_labels.sort()
             st.session_state.existing_labels = distinct_labels
         st.session_state.last_search_params = current_search_params
 
-    # If search parameters have changed but "Search and Group" hasn't been clicked, reset filtered_df to force a new search
-    if st.session_state.last_search_params != current_search_params and st.session_state.filtered_df is not None:
-        st.session_state.filtered_df = None
-        st.session_state.last_search_params = current_search_params
-
     if st.session_state.filtered_df is None and current_search_params == st.session_state.last_search_params:
-        # Start with a copy of the full DataFrame for filtering
         df = st.session_state.full_df.copy()
-
-        # Remove rows with empty combined_text
-        initial_row_count = len(df)
-        df = df[df['combined_text'].notnull() & (df['combined_text'].str.strip() != '')]
-        removed_rows = initial_row_count - len(df)
-        if removed_rows > 0:
-            st.info(f"Removed {removed_rows} rows with empty or null combined_text.")
-
-        if df.empty:
-            st.error("After filtering, no rows remain. Please check the data.")
-            return
 
         # Filter by search words
         if search_words:
-            df = df[df['combined_text'].str.contains(search_words, case=False, na=False)]
+            df = df[df['combined_text'].str.contains(search_words.lower(), case=False, na=False)]
             if df.empty:
-                st.warning("No documents found containing the search words.")
+                st.warning(f"No documents found containing the search words: '{search_words}'.")
                 return
 
         # Filter by labeled/unlabeled based on the toggle
@@ -156,13 +162,12 @@ def app():
             return  # Error message already displayed in perform_clustering
 
         # Update existing_labels with any new labels from the filtered DataFrame
-        distinct_labels = [x for x in df['label'].unique() if pd.notnull(x) and x.strip() != ""]
+        distinct_labels = [x for x in df['label'].unique() if x.strip() != ""]
         for label in distinct_labels:
             if label not in st.session_state.existing_labels:
                 st.session_state.existing_labels.append(label)
         st.session_state.existing_labels.sort()
 
-        # Display cluster distribution
         st.write("### Cluster Distribution")
         cluster_counts = df['cluster'].value_counts().sort_index().to_dict()
         st.write({f"Cluster {k+1}": v for k, v in cluster_counts.items()})
@@ -176,7 +181,6 @@ def app():
         n_clusters = st.session_state.n_clusters
         cluster = st.session_state.cluster
 
-        # Display parameters
         st.header("Parameters")
         st.write(f"Displaying up to {n_similares} similar documents")
         st.write(f"Cluster: {cluster+1} of {n_clusters}")
@@ -239,13 +243,13 @@ def app():
                     st.error("Please select a label or add a new label before labeling documents.")
                 else:
                     label_to_apply = selected_label if selected_label else new_label
-                    full_df = st.session_state.full_df  # Get the full DataFrame
-                    filtered_df = st.session_state.filtered_df  # Get the filtered DataFrame
+                    full_df = st.session_state.full_df
+                    filtered_df = st.session_state.filtered_df
 
-                    # Update labels in the full DataFrame using the index
+                    # Update labels in both DataFrames
                     for idx in selected_similars:
                         full_df.at[idx, 'label'] = label_to_apply
-                        filtered_df.at[idx, 'label'] = label_to_apply  # Update filtered_df for display
+                        filtered_df.at[idx, 'label'] = label_to_apply
 
                     # Update existing_labels with the new label if it was just added
                     if new_label and new_label not in st.session_state.existing_labels:
@@ -255,8 +259,8 @@ def app():
                     # Save the full DataFrame to the .parquet file
                     try:
                         full_df.to_parquet(parquet_file, index=False)
-                        st.session_state.full_df = full_df  # Update the session state
-                        st.session_state.filtered_df = filtered_df  # Update the filtered DataFrame
+                        st.session_state.full_df = full_df
+                        st.session_state.filtered_df = filtered_df
                         st.success("Documents labeled successfully and file updated!")
                     except Exception as e:
                         st.error(f"Error saving file: {e}")
