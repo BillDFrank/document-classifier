@@ -23,7 +23,9 @@ def app():
             # Total number of columns
             total_columns = len(df.columns)
             st.write(f"- **Total Number of Columns**: {total_columns}")
-
+            # Total number of rows 
+            total_rows = len(df['id_doc'])
+            st.write(f"- **Total Number of Rows**: {total_rows}")
             # Check if 'label' column exists, and calculate label statistics
             if 'label' in df.columns:
                 # Ensure labels are treated as strings and handle NaN/None
@@ -31,7 +33,6 @@ def app():
                 # Total number of rows with labels (non-empty strings)
                 labeled_rows = df[df['label'] != ""].shape[0]
                 st.write(f"- **Total Number of Rows with Labels**: {labeled_rows}")
-
                 # Count of each label (excluding empty strings)
                 label_counts = df[df['label'] != ""]['label'].value_counts()
                 if not label_counts.empty:
