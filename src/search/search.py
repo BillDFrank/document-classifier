@@ -81,11 +81,8 @@ def app():
         if 'label' not in full_df.columns:
             full_df['label'] = ""
         full_df['label'] = full_df['label'].astype(str).fillna("")
-        # Filter out rows with empty or whitespace-only combined_text
-        full_df = full_df[full_df['combined_text'].str.strip() != '']
-        if full_df.empty:
-            st.error("No non-empty rows found in the Parquet file.")
-            return
+        # Instead of filtering out empty rows, we'll just ensure they're properly handled
+        full_df['combined_text'] = full_df['combined_text'].fillna("")
         # Update session state
         st.session_state.full_df = full_df
         st.session_state.last_parquet_file = parquet_file
@@ -125,10 +122,7 @@ def app():
             if 'label' not in full_df.columns:
                 full_df['label'] = ""
             full_df['label'] = full_df['label'].astype(str).fillna("")
-            full_df = full_df[full_df['combined_text'].str.strip() != '']
-            if full_df.empty:
-                st.error("No non-empty rows found in the Parquet file.")
-                return
+            full_df['combined_text'] = full_df['combined_text'].fillna("")
             st.session_state.full_df = full_df
             # Update existing_labels with labels from the new DataFrame
             distinct_labels = [x for x in full_df['label'].unique() if x.strip() != ""]
@@ -243,13 +237,15 @@ def app():
                     st.error("Please select a label or add a new label before labeling documents.")
                 else:
                     label_to_apply = selected_label if selected_label else new_label
-                    full_df = st.session_state.full_df
-                    filtered_df = st.session_state.filtered_df
+                    full_df = st.session_state.full_df.copy()  # Create a copy to avoid modifying the original
+                    filtered_df = st.session_state.filtered_df.copy()  # Create a copy to avoid modifying the original
 
                     # Update labels in both DataFrames
                     for idx in selected_similars:
-                        full_df.at[idx, 'label'] = label_to_apply
-                        filtered_df.at[idx, 'label'] = label_to_apply
+                        if idx in full_df.index:
+                            full_df.at[idx, 'label'] = label_to_apply
+                        if idx in filtered_df.index:
+                            filtered_df.at[idx, 'label'] = label_to_apply
 
                     # Update existing_labels with the new label if it was just added
                     if new_label and new_label not in st.session_state.existing_labels:
@@ -258,6 +254,13 @@ def app():
 
                     # Save the full DataFrame to the .parquet file
                     try:
+                        # Ensure we're not losing any documents by comparing row counts
+                        original_count = len(st.session_state.full_df)
+                        new_count = len(full_df)
+                        if new_count < original_count:
+                            st.error(f"Error: Document count decreased from {original_count} to {new_count}. Aborting save.")
+                            return
+                            
                         full_df.to_parquet(parquet_file, index=False)
                         st.session_state.full_df = full_df
                         st.session_state.filtered_df = filtered_df
