@@ -172,18 +172,24 @@ def app():
             if selected_similars:
                 # Update labels in the in-memory DataFrame
                 label_to_apply = selected_label if existing_labels else new_label
+                df_copy = st.session_state.df.copy()  # Create a copy to avoid modifying the original
+                
+                # Update labels in the copy
                 for idx in selected_similars:
-                    st.session_state.df.at[idx, 'label'] = label_to_apply
+                    if idx in df_copy.index:
+                        df_copy.at[idx, 'label'] = label_to_apply
 
-                # Update only the modified rows in the Parquet file
-                updated_rows = st.session_state.df.loc[selected_similars, ['label']]
                 try:
-                    # Load the existing Parquet file
-                    existing_df = pd.read_parquet(parquet_file)
-                    # Update the specific rows
-                    existing_df.update(updated_rows)
-                    # Save the updated DataFrame back to the Parquet file
-                    existing_df.to_parquet(parquet_file, index=False)
+                    # Ensure we're not losing any documents by comparing row counts
+                    original_count = len(st.session_state.df)
+                    new_count = len(df_copy)
+                    if new_count < original_count:
+                        st.error(f"Error: Document count decreased from {original_count} to {new_count}. Aborting save.")
+                        return
+
+                    # Save the entire DataFrame to ensure no documents are lost
+                    df_copy.to_parquet(parquet_file, index=False)
+                    st.session_state.df = df_copy
                     st.success("Elements labeled successfully and file updated!")
                 except Exception as e:
                     st.error(f"Error saving file: {e}")

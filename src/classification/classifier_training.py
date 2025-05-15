@@ -66,7 +66,6 @@ def app():
         st.sidebar.subheader("Logistic Regression Hyperparameters")
         logreg_params['C'] = st.sidebar.slider("C (Regularization Strength)", 0.01, 10.0, 1.0, step=0.01)
         logreg_params['max_iter'] = st.sidebar.number_input("Max Iterations", min_value=100, max_value=5000, value=1000, step=100)
-        threshold = st.sidebar.slider("Classification Threshold (for binary classification)", 0.0, 1.0, 0.5, step=0.05)
         if len(df_labeled['label'].unique()) > 2:
             st.sidebar.warning("Threshold adjustment is only applicable for binary classification. It will be ignored for multi-class tasks.")
 
@@ -127,6 +126,16 @@ def app():
         progress_bar = st.progress(0)
         status_text = st.empty()
 
+        # Get number of classes and their labels
+        n_classes = len(label_encoder.classes_)
+        class_labels = list(range(n_classes))  # Use numeric indices for consistent matrix sizes
+        st.write(f"Number of classes detected: {n_classes}")
+        
+        # If more than 2 classes, disable threshold selection for Logistic Regression
+        if n_classes > 2 and selected_model == "Logistic Regression":
+            threshold = 0.5  # Reset to default
+            st.warning("Threshold adjustment is not applicable for multi-class classification. Using default decision boundary.")
+
         # Estimate training time
         n_samples = len(X)
         estimated_times_per_fold = {
@@ -148,9 +157,17 @@ def app():
 
             # Train the selected model with user-specified hyperparameters
             if selected_model == "Logistic Regression":
-                model = LogisticRegression(C=logreg_params['C'], max_iter=logreg_params['max_iter'], random_state=42)
+                if n_classes > 2:
+                    model = LogisticRegression(C=logreg_params['C'], max_iter=logreg_params['max_iter'], 
+                                             multi_class='multinomial', solver='lbfgs', random_state=42)
+                else:
+                    model = LogisticRegression(C=logreg_params['C'], max_iter=logreg_params['max_iter'], random_state=42)
             elif selected_model == "SVM":
-                model = SVC(C=svm_params['C'], kernel=svm_params['kernel'], gamma=svm_params['gamma'], random_state=42)
+                if n_classes > 2:
+                    model = SVC(C=svm_params['C'], kernel=svm_params['kernel'], gamma=svm_params['gamma'],
+                              decision_function_shape='ovr', random_state=42)
+                else:
+                    model = SVC(C=svm_params['C'], kernel=svm_params['kernel'], gamma=svm_params['gamma'], random_state=42)
             elif selected_model == "Random Forest":
                 model = RandomForestClassifier(
                     n_estimators=rf_params['n_estimators'],
@@ -159,15 +176,17 @@ def app():
                     random_state=42
                 )
             elif selected_model == "Neural Network":
+                # Adjust hidden layer sizes based on number of classes
+                hidden_size = max(nn_params['hidden_layer_sizes'][0], n_classes * 10)
                 model = MLPClassifier(
-                    hidden_layer_sizes=nn_params['hidden_layer_sizes'],
+                    hidden_layer_sizes=(hidden_size,),
                     learning_rate_init=nn_params['learning_rate_init'],
                     max_iter=nn_params['max_iter'],
                     random_state=42
                 )
             elif selected_model == "KNN":
                 model = KNeighborsClassifier(
-                    n_neighbors=knn_params['n_neighbors'],
+                    n_neighbors=min(knn_params['n_neighbors'], len(X_train)),
                     weights=knn_params['weights'],
                     p=knn_params['p']
                 )
@@ -175,12 +194,12 @@ def app():
             model.fit(X_train, y_train)
 
             # Get predictions
-            if is_binary and selected_model == "Logistic Regression" and hasattr(model, "predict_proba"):
-                # For binary classification with Logistic Regression, use probabilities and apply threshold
-                y_scores = model.predict_proba(X_test)[:, 1]  # Probability for class 1
+            if n_classes == 2 and selected_model == "Logistic Regression" and threshold != 0.5:
+                # Only use threshold for binary Logistic Regression when custom threshold is set
+                y_scores = model.predict_proba(X_test)[:, 1]
                 y_pred = (y_scores >= threshold).astype(int)
             else:
-                # For other models or multi-class tasks, use default predictions
+                # For multi-class or other models, use standard predict
                 y_pred = model.predict(X_test)
 
             # Evaluate on the test fold
@@ -188,7 +207,10 @@ def app():
             precisions.append(precision_score(y_test, y_pred, average='weighted'))
             recalls.append(recall_score(y_test, y_pred, average='weighted'))
             f1_scores.append(f1_score(y_test, y_pred, average='weighted'))
-            confusion_matrices.append(confusion_matrix(y_test, y_pred))
+            
+            # Create confusion matrix with fixed size for all classes
+            conf_matrix = confusion_matrix(y_test, y_pred, labels=class_labels)
+            confusion_matrices.append(conf_matrix)
 
             # Collect predictions for aggregated classification report
             all_y_test.extend(y_test.tolist())
@@ -225,7 +247,8 @@ def app():
         avg_f1 = np.mean(f1_scores)
         std_f1 = np.std(f1_scores)
 
-        # Sum confusion matrices to get an aggregate
+        # Convert confusion matrices to numpy array and sum
+        confusion_matrices = np.array(confusion_matrices)
         agg_conf_matrix = np.sum(confusion_matrices, axis=0)
 
         # Get original labels for confusion matrix and classification report

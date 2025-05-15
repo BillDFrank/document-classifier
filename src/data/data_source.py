@@ -224,6 +224,7 @@ def app():
 
             status_text.text("💾 Saving file...")
             result_df = pd.DataFrame(data)
+            result_df['id_doc'] = result_df['id_doc'].astype(str)
             result_df['label'] = result_df['label'].astype(str)
             result_df.to_parquet(output_file, index=False)
             current_step += 1
