@@ -35,6 +35,13 @@ def app():
     selected_file = st.sidebar.selectbox("Select a Parquet file", parquet_files)
     selected_model_file = st.sidebar.selectbox("Select a Model", model_files)
     min_confidence = st.sidebar.slider("Minimum Confidence Threshold", 0.0, 1.0, 0.5, step=0.05)
+    
+    # Add option to choose prediction scope
+    prediction_scope = st.sidebar.radio(
+        "Prediction Scope",
+        ["Only Unlabeled Rows", "All Rows"],
+        help="Choose whether to predict labels for all rows or only unlabeled rows"
+    )
 
     # Button to start prediction
     if st.sidebar.button("Predict Labels"):
@@ -42,24 +49,30 @@ def app():
         file_path = os.path.join(PARQUET_DIR, selected_file)
         df = pd.read_parquet(file_path)
 
-        # Filter out rows with blank combined_text or filled labels
-        df_unlabeled = df[
-            (df['combined_text'].notnull()) & 
-            (df['combined_text'].str.strip() != '') & 
-            (df['label'].isnull() | (df['label'].str.strip() == ''))
-        ]
+        # Filter rows based on prediction scope
+        if prediction_scope == "Only Unlabeled Rows":
+            df_to_predict = df[
+                (df['combined_text'].notnull()) & 
+                (df['combined_text'].str.strip() != '') & 
+                (df['label'].isnull() | (df['label'].str.strip() == ''))
+            ]
+        else:  # "All Rows"
+            df_to_predict = df[
+                (df['combined_text'].notnull()) & 
+                (df['combined_text'].str.strip() != '')
+            ]
 
         # Check for embedding column and drop rows with missing embeddings
-        if 'embedding' not in df_unlabeled.columns:
+        if 'embedding' not in df_to_predict.columns:
             st.error("The Parquet file does not contain an 'embedding' column.")
             return
-        df_unlabeled = df_unlabeled.dropna(subset=['embedding'])
+        df_to_predict = df_to_predict.dropna(subset=['embedding'])
 
-        if df_unlabeled.empty:
-            st.warning("No unlabeled data with embeddings found for prediction.")
+        if df_to_predict.empty:
+            st.warning(f"No {'unlabeled ' if prediction_scope == 'Only Unlabeled Rows' else ''}data with embeddings found for prediction.")
             return
 
-        st.write(f"Found {len(df_unlabeled)} unlabeled rows with embeddings for prediction.")
+        st.write(f"Found {len(df_to_predict)} rows with embeddings for prediction.")
 
         # Load the model
         model_path = os.path.join(MODEL_DIR, selected_model_file)
@@ -79,17 +92,17 @@ def app():
             return
 
         # Prepare features
-        X_unlabeled = np.array(df_unlabeled['embedding'].tolist())
+        X_to_predict = np.array(df_to_predict['embedding'].tolist())
 
         # Get predictions and confidences
         if hasattr(model, "predict_proba"):
             # Get probabilities
-            probabilities = model.predict_proba(X_unlabeled)
+            probabilities = model.predict_proba(X_to_predict)
             confidences = np.max(probabilities, axis=1)  # Maximum probability as confidence
             y_pred = np.argmax(probabilities, axis=1)    # Predicted class
         else:
             # For models without predict_proba (e.g., SVM without probability=True)
-            y_pred = model.predict(X_unlabeled)
+            y_pred = model.predict(X_to_predict)
             confidences = np.ones(len(y_pred))  # Assign confidence of 1.0 (no filtering possible)
 
         # Decode the predicted labels using the LabelEncoder
@@ -101,9 +114,10 @@ def app():
 
         # Create a DataFrame with predictions
         results_df = pd.DataFrame({
-            'id_doc': df_unlabeled['id_doc'].values,
-            'combined_text': df_unlabeled['combined_text'].values,
-            'label': y_pred_labels,
+            'id_doc': df_to_predict['id_doc'].values,
+            'combined_text': df_to_predict['combined_text'].values,
+            'original_label': df_to_predict['label'].values if 'label' in df_to_predict.columns else None,
+            'predicted_label': y_pred_labels,
             'confidence': confidences
         })
 
@@ -118,8 +132,59 @@ def app():
 
         # Display the number of predictions for each class
         st.write("### Prediction Distribution by Class")
-        class_counts = results_df['label'].value_counts().to_dict()
+        class_counts = results_df['predicted_label'].value_counts().to_dict()
         st.write(class_counts)
+
+        # If predicting all rows, show comparison with original labels
+        if prediction_scope == "All Rows" and 'original_label' in results_df.columns:
+            st.write("### Comparison with Original Labels")
+            # Calculate accuracy for rows that had original labels
+            mask = results_df['original_label'].notna() & (results_df['original_label'].str.strip() != '')
+            if mask.any():
+                accuracy = (results_df.loc[mask, 'original_label'] == results_df.loc[mask, 'predicted_label']).mean()
+                st.write(f"Accuracy on previously labeled data: {accuracy:.2%}")
+                
+                # Show confusion matrix for rows with original labels
+                from sklearn.metrics import confusion_matrix
+                import plotly.figure_factory as ff
+                
+                # Get unique labels and ensure they're in the same order as the label encoder
+                unique_labels = label_encoder.classes_
+                
+                # Create confusion matrix
+                conf_matrix = confusion_matrix(
+                    results_df.loc[mask, 'original_label'],
+                    results_df.loc[mask, 'predicted_label'],
+                    labels=unique_labels
+                )
+                
+                # Convert labels to strings to ensure they're compatible with plotly
+                label_names = [str(label) for label in unique_labels]
+                
+                # Create the heatmap
+                fig = ff.create_annotated_heatmap(
+                    z=conf_matrix,
+                    x=label_names,
+                    y=label_names,
+                    colorscale='Blues',
+                    showscale=True,
+                    annotation_text=conf_matrix.astype(str)
+                )
+                
+                # Update layout
+                fig.update_layout(
+                    title="Confusion Matrix (Original vs Predicted Labels)",
+                    xaxis_title="Predicted Label",
+                    yaxis_title="Original Label",
+                    width=500,
+                    height=500
+                )
+                
+                # Update x and y axis to show all labels
+                fig.update_xaxes(tickangle=45)
+                fig.update_yaxes(tickangle=0)
+                
+                st.plotly_chart(fig)
 
         # Save predictions to CSV
         parquet_base_name = os.path.splitext(selected_file)[0]
