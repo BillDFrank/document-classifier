@@ -81,7 +81,7 @@ notebook @ file:///C:/b/abs_b552cuftgu/croot/notebook_1738159967315/work
 notebook_shim @ file:///C:/b/abs_9ctyfgpncn/croot/notebook-shim_1741707829491/work
 numpy==2.2.4
 openpyxl==3.1.5
-opensearch-py==2.8.0
+
 overrides @ file:///C:/b/abs_cfh89c8yf4/croot/overrides_1699371165349/work
 packaging @ file:///home/conda/feedstock_root/build_artifacts/packaging_1733203243479/work
 pandas==2.2.3

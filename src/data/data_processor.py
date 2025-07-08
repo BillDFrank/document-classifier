@@ -2,8 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-from opensearchpy import OpenSearch
-from src.utilities.helpers import connect_opensearch, fetch_documents, create_dataframe
+
 
 def generate_label_sequence(group):
     """Generate a label sequence with counts for each envelope."""
@@ -18,30 +17,16 @@ def app():
     st.title('Process Comparison')
     st.write("Identifies similar processes based on a reference process.")
 
+    if 'df' not in st.session_state:
+        st.warning("Nenhum dado carregado. Por favor, carregue um arquivo Parquet na seção 'Datasource'.")
+        return
+
+    df = st.session_state.df
+
     # Input for the reference envelope
     reference_envelope = st.sidebar.text_input("Enter the reference envelope number")
 
     if reference_envelope:
-        # Connect to OpenSearch and fetch documents
-        HOST = "10.10.25.161"
-        PORT = 9200
-        es = connect_opensearch(HOST, PORT)
-        if not es.ping():
-            st.sidebar.error("Failed to connect to OpenSearch")
-            return
-        st.sidebar.success("Connection successful")
-
-        # App configuration
-        st.sidebar.title("Settings")
-        opensearch_index = st.sidebar.text_input("OpenSearch Index", "classificador_dados_sensiveis")
-        documents = fetch_documents(es, opensearch_index)
-
-        if not documents:
-            st.error("No documents found in the specified index.")
-            return
-
-        df = create_dataframe(documents)
-
         # Ensure 'label' column contains strings and filter invalid entries
         df['label'] = df['label'].astype(str)
         df_filtered = df[df['label'].notna() & (df['label'] != "") & (df['label'] != "nan")]

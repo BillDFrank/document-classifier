@@ -1,4 +1,4 @@
-from src.visualization.plotter import app as plot
+
 from src.classification.classifier_training import app as classifier_training
 from src.classification.classifier import app as classifier
 from src.search.suggestion import app as suggestion
@@ -28,7 +28,6 @@ app_selection = st.sidebar.radio("Select an App", [
     "Suggestion",
     "Classifier - Training",
     "Classifier",
-    "Plot",
     "Convert Parquet to CSV",
     "Text Classifier"
 ])
@@ -48,8 +47,7 @@ elif app_selection == "Classifier - Training":
     classifier_training()
 elif app_selection == "Classifier":
     classifier()
-elif app_selection == "Plot":
-    plot()
+
 elif app_selection == "Convert Parquet to CSV":
     converter()
 elif app_selection == "Text Classifier":
