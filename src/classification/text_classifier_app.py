@@ -29,7 +29,7 @@ def app():
 
     # Get list of available classification models
     models_dir = "models"
-    model_files = [f for f in os.listdir(models_dir) if f.endswith(('.joblib', '.pkl')) and not f.startswith('vectorizer')]
+    model_files = [f for f in os.listdir(models_dir) if f.endswith(('.joblib', '.pkl')) and not f.startswith('vectorizer') and not 'label_encoder' in f]
 
     if not model_files:
         st.warning("No trained classification models found in the 'models' folder. Please train a model first.")
@@ -38,9 +38,27 @@ def app():
     selected_model_file = st.selectbox("Select a trained classification model", model_files)
     
     # Load the selected classification model
+    label_encoder = None
     try:
         model_path = os.path.join(models_dir, selected_model_file)
         classification_model = joblib.load(model_path)
+        
+        # Try to load the corresponding label encoder
+        if selected_model_file.endswith('.pkl'):
+            encoder_file = selected_model_file.replace('.pkl', '_label_encoder.pkl')
+        elif selected_model_file.endswith('.joblib'):
+            encoder_file = selected_model_file.replace('.joblib', '_label_encoder.joblib')
+        else:
+            encoder_file = ''
+            
+        if encoder_file:
+            encoder_path = os.path.join(models_dir, encoder_file)
+            if os.path.exists(encoder_path):
+                try:
+                    label_encoder = joblib.load(encoder_path)
+                except Exception as e:
+                    st.warning(f"Could not load label encoder: {e}")
+
     except Exception as e:
         st.error(f"Error loading classification model: {e}")
         return
@@ -78,10 +96,26 @@ def app():
                 # Predict using the classification model
                 predictions = classification_model.predict(embeddings)
                 
+                # Get prediction probabilities
+                try:
+                    probabilities = classification_model.predict_proba(embeddings)
+                    confidences = [max(prob) for prob in probabilities]
+                except AttributeError:
+                    # Model does not have predict_proba, so we can't show confidence
+                    confidences = ["N/A"] * len(predictions)
+
+                # Transform predictions to labels if encoder is available
+                if label_encoder:
+                    try:
+                        predictions = label_encoder.inverse_transform(predictions)
+                    except Exception as e:
+                        st.warning(f"Could not transform predictions to labels: {e}")
+
                 st.subheader("Classification Results:")
                 results_df = pd.DataFrame({
                     "Input Text": texts_to_classify,
-                    "Predicted Class": predictions
+                    "Predicted Class": predictions,
+                    "Confidence": confidences
                 })
                 st.table(results_df)
 
