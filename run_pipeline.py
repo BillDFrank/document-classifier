@@ -7,6 +7,7 @@ from src.clustering.clusterer import app as cluster
 from src.data.data_source import app as datasource
 from src.utilities.converter import app as converter
 from src.classification.text_classifier_app import app as text_classifier_app
+from src.classification.text_comparator_app import app as text_comparator_app
 import streamlit as st
 import sys
 import os
@@ -29,7 +30,8 @@ app_selection = st.sidebar.radio("Select an App", [
     "Classifier - Training",
     "Classifier",
     "Convert Parquet to CSV",
-    "Text Classifier"
+    "Text Classifier",
+    "Text Comparator"
 ])
 
 if app_selection == "Home":
@@ -52,3 +54,5 @@ elif app_selection == "Convert Parquet to CSV":
     converter()
 elif app_selection == "Text Classifier":
     text_classifier_app()
+elif app_selection == "Text Comparator":
+    text_comparator_app()
