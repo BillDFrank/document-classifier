@@ -11,14 +11,42 @@ def app():
 
     model = load_model()
 
-    st.header("Upload CSV Files")
-    uploaded_file_1 = st.file_uploader("Upload the first CSV file", type="csv")
-    uploaded_file_2 = st.file_uploader("Upload the second CSV file", type="csv")
+    st.header("Upload CSV or XLSX Files")
+    uploaded_file_1 = st.file_uploader("Upload the first file (CSV or XLSX)", type=["csv", "xlsx"])
+    uploaded_file_2 = st.file_uploader("Upload the second file (CSV or XLSX)", type=["csv", "xlsx"])
+
+    def read_file(uploaded_file):
+        if uploaded_file is None:
+            return None
+        if uploaded_file.name.lower().endswith('.csv'):
+            try:
+                return pd.read_csv(uploaded_file, encoding='utf-8')
+            except UnicodeDecodeError:
+                try:
+                    uploaded_file.seek(0)
+                    return pd.read_csv(uploaded_file, encoding='latin1')
+                except Exception as e:
+                    st.error(f"Failed to read CSV file: {e}")
+                    return None
+            except Exception as e:
+                st.error(f"Failed to read CSV file: {e}")
+                return None
+        elif uploaded_file.name.lower().endswith('.xlsx'):
+            try:
+                return pd.read_excel(uploaded_file)
+            except Exception as e:
+                st.error(f"Failed to read XLSX file: {e}")
+                return None
+        else:
+            st.error("Unsupported file type. Please upload a CSV or XLSX file.")
+            return None
 
     if uploaded_file_1 and uploaded_file_2:
         try:
-            df1 = pd.read_csv(uploaded_file_1)
-            df2 = pd.read_csv(uploaded_file_2)
+            df1 = read_file(uploaded_file_1)
+            df2 = read_file(uploaded_file_2)
+            if df1 is None or df2 is None:
+                return
 
             st.header("Select Columns to Compare")
             col1 = st.selectbox("Select column from the first file", df1.columns)
