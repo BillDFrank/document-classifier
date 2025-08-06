@@ -3,48 +3,82 @@ import pandas as pd
 import numpy as np
 from sklearn.cluster import KMeans
 import os
+import logging
+from pathlib import Path
 
-# Directory where Parquet files are saved
-PARQUET_DIR = os.path.join("data", "processed")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Directory paths using pathlib.Path for cross-platform compatibility
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PARQUET_DIR = BASE_DIR / "data" / "processed"
 
 def perform_clustering(df, n_clusters):
     """Performs K-Means clustering on the dataset using embeddings."""
-    if df.empty:
+    try:
+        if df.empty:
+            logger.warning("Empty DataFrame provided for clustering")
+            return None, None
+
+        # Check for embedding column
+        if 'embedding' not in df.columns:
+            st.error("The Parquet file does not contain an 'embedding' column. Clustering requires embeddings for similarity grouping.")
+            logger.error("Missing 'embedding' column in DataFrame")
+            return None, None
+
+        # Prepare features from embeddings
+        try:
+            X = np.array(df['embedding'].tolist())
+            if X.size == 0:
+                logger.warning("Empty embeddings array")
+                return None, None
+        except Exception as e:
+            logger.error(f"Error converting embeddings to numpy array: {e}")
+            st.error(f"Error processing embeddings: {e}")
+            return None, None
+
+        # Determine the number of clusters (ensure it's not larger than the number of rows)
+        n_clusters = min(n_clusters, len(df))
+        if n_clusters < 1:
+            logger.warning("Number of clusters is less than 1")
+            return None, None
+
+        # Apply K-Means
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        df["cluster"] = kmeans.fit_predict(X)
+        
+        logger.info(f"Successfully performed clustering with {n_clusters} clusters")
+        return df, kmeans
+        
+    except Exception as e:
+        logger.error(f"Error in perform_clustering: {e}")
+        st.error(f"Error during clustering: {e}")
         return None, None
-
-    # Check for embedding column
-    if 'embedding' not in df.columns:
-        st.error("The Parquet file does not contain an 'embedding' column. Clustering requires embeddings for similarity grouping.")
-        return None, None
-
-    # Prepare features from embeddings
-    X = np.array(df['embedding'].tolist())
-
-    # Determine the number of clusters (ensure it's not larger than the number of rows)
-    n_clusters = min(n_clusters, len(df))
-    if n_clusters < 1:
-        return None, None
-
-    # Apply K-Means
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    df["cluster"] = kmeans.fit_predict(X)
-
-    return df, kmeans
 
 def app():
-    st.title("Search and Label Documents")
+    st.title("🔍 Search and Label Documents")
     st.write("Search for documents by text, group them by similarity, and label them.")
 
-    st.sidebar.title("Settings")
+    st.sidebar.title("⚙️ Settings")
 
     # List all .parquet files in the data/processed directory
-    if not os.path.exists(PARQUET_DIR):
-        st.error(f"Directory '{PARQUET_DIR}' not found. Generate embeddings first.")
-        return
+    try:
+        if not PARQUET_DIR.exists():
+            st.error(f"Directory '{PARQUET_DIR}' not found. Generate embeddings first.")
+            logger.error(f"Parquet directory not found: {PARQUET_DIR}")
+            return
 
-    parquet_files = [f for f in os.listdir(PARQUET_DIR) if f.endswith(".parquet")]
-    if not parquet_files:
-        st.error(f"No Parquet files found in '{PARQUET_DIR}'. Generate embeddings first.")
+        parquet_files = [f.name for f in PARQUET_DIR.iterdir() if f.suffix.lower() == ".parquet"]
+        if not parquet_files:
+            st.error(f"No Parquet files found in '{PARQUET_DIR}'. Generate embeddings first.")
+            logger.warning(f"No parquet files found in {PARQUET_DIR}")
+            return
+            
+        logger.info(f"Found {len(parquet_files)} parquet files in {PARQUET_DIR}")
+    except Exception as e:
+        st.error(f"Error accessing parquet directory: {e}")
+        logger.error(f"Error accessing parquet directory: {e}")
         return
 
     # Let the user select a Parquet file
@@ -55,7 +89,7 @@ def app():
     )
 
     # Construct the full path to the selected Parquet file
-    parquet_file = os.path.join(PARQUET_DIR, selected_parquet)
+    parquet_file = PARQUET_DIR / selected_parquet
 
     # Sidebar inputs
     n_similares = st.sidebar.slider("Number of Similar Documents per Batch", 1, 30, 10)
@@ -68,24 +102,39 @@ def app():
     submit_button = st.sidebar.button("Search and Group")
 
     # Initialize session state variables
-    if 'full_df' not in st.session_state or st.session_state.get('last_parquet_file') != parquet_file:
-        # Load the full DataFrame at the start or when the parquet file changes
-        full_df = pd.read_parquet(parquet_file)
-        # Ensure combined_text is a string column
-        if 'combined_text' in full_df.columns:
-            full_df['combined_text'] = full_df['combined_text'].astype(str)
-        else:
-            st.error("The 'combined_text' column is missing from the Parquet file.")
+    if 'full_df' not in st.session_state or st.session_state.get('last_parquet_file') != str(parquet_file):
+        try:
+            # Load the full DataFrame at the start or when the parquet file changes
+            logger.info(f"Loading parquet file: {parquet_file}")
+            full_df = pd.read_parquet(parquet_file)
+            
+            # Ensure combined_text is a string column
+            if 'combined_text' not in full_df.columns:
+                st.error("The 'combined_text' column is missing from the Parquet file.")
+                logger.error("Missing 'combined_text' column in parquet file")
+                return
+            
+            # Ensure combined_text is a string column
+            full_df['combined_text'] = full_df['combined_text'].astype(str).fillna("")
+            
+            # Ensure label is a string column
+            if 'label' not in full_df.columns:
+                full_df['label'] = ""
+            full_df['label'] = full_df['label'].astype(str).fillna("")
+            
+            # Ensure id_doc exists
+            if 'id_doc' not in full_df.columns:
+                full_df['id_doc'] = full_df.index.astype(str)
+            
+            # Update session state
+            st.session_state.full_df = full_df
+            st.session_state.last_parquet_file = str(parquet_file)
+            logger.info(f"Successfully loaded {len(full_df)} documents from {parquet_file}")
+            
+        except Exception as e:
+            st.error(f"Error loading parquet file: {e}")
+            logger.error(f"Error loading parquet file {parquet_file}: {e}")
             return
-        # Ensure label is a string column
-        if 'label' not in full_df.columns:
-            full_df['label'] = ""
-        full_df['label'] = full_df['label'].astype(str).fillna("")
-        # Instead of filtering out empty rows, we'll just ensure they're properly handled
-        full_df['combined_text'] = full_df['combined_text'].fillna("")
-        # Update session state
-        st.session_state.full_df = full_df
-        st.session_state.last_parquet_file = parquet_file
 
     if 'filtered_df' not in st.session_state:
         st.session_state.filtered_df = None
@@ -131,43 +180,69 @@ def app():
         st.session_state.last_search_params = current_search_params
 
     if st.session_state.filtered_df is None and current_search_params == st.session_state.last_search_params:
-        df = st.session_state.full_df.copy()
+        try:
+            df = st.session_state.full_df.copy()
+            logger.info(f"Starting search with {len(df)} total documents")
 
-        # Filter by search words
-        if search_words:
-            df = df[df['combined_text'].str.contains(search_words.lower(), case=False, na=False)]
-            if df.empty:
-                st.warning(f"No documents found containing the search words: '{search_words}'.")
-                return
+            # Filter by search words
+            if search_words:
+                search_words_clean = search_words.strip()
+                if search_words_clean:
+                    mask = df['combined_text'].str.contains(
+                        search_words_clean.lower(),
+                        case=False,
+                        na=False,
+                        regex=False  # Use literal string matching for safety
+                    )
+                    df = df[mask]
+                    if df.empty:
+                        st.warning(f"No documents found containing the search words: '{search_words_clean}'.")
+                        logger.info(f"No documents found for search: '{search_words_clean}'")
+                        return
 
-        # Filter by labeled/unlabeled based on the toggle
-        if not include_labeled:
-            df = df[df['label'] == ""]
-            if df.empty:
-                st.warning("No unlabeled documents found matching the search criteria.")
-                return
+            # Filter by labeled/unlabeled based on the toggle
+            if not include_labeled:
+                df = df[df['label'].str.strip() == ""]
+                if df.empty:
+                    st.warning("No unlabeled documents found matching the search criteria.")
+                    logger.info("No unlabeled documents found")
+                    return
 
-        # Perform clustering to group similar documents
-        n_clusters = max(1, min(len(df) // n_similares, 50))  # At least 1 cluster, at most 50
-        st.session_state.n_clusters = n_clusters
-        df, kmeans = perform_clustering(df, n_clusters)
+            # Perform clustering to group similar documents
+            n_clusters = max(1, min(len(df) // max(1, n_similares), 50))  # At least 1 cluster, at most 50
+            st.session_state.n_clusters = n_clusters
+            
+            if len(df) < 2:
+                st.info("Not enough documents for clustering. Showing all documents in a single group.")
+                df['cluster'] = 0
+                kmeans = None
+            else:
+                df, kmeans = perform_clustering(df, n_clusters)
 
-        if df is None:
-            return  # Error message already displayed in perform_clustering
+            if df is None:
+                return  # Error message already displayed in perform_clustering
 
-        # Update existing_labels with any new labels from the filtered DataFrame
-        distinct_labels = [x for x in df['label'].unique() if x.strip() != ""]
-        for label in distinct_labels:
-            if label not in st.session_state.existing_labels:
-                st.session_state.existing_labels.append(label)
-        st.session_state.existing_labels.sort()
+            # Update existing_labels with any new labels from the filtered DataFrame
+            distinct_labels = [x for x in df['label'].unique() if x and x.strip() != ""]
+            for label in distinct_labels:
+                if label not in st.session_state.existing_labels:
+                    st.session_state.existing_labels.append(label)
+            st.session_state.existing_labels.sort()
 
-        st.write("### Cluster Distribution")
-        cluster_counts = df['cluster'].value_counts().sort_index().to_dict()
-        st.write({f"Cluster {k+1}": v for k, v in cluster_counts.items()})
+            st.write("### 📊 Cluster Distribution")
+            cluster_counts = df['cluster'].value_counts().sort_index().to_dict()
+            cluster_display = {f"Cluster {k+1}": f"{v} documents" for k, v in cluster_counts.items()}
+            st.json(cluster_display)
 
-        st.session_state.filtered_df = df
-        st.session_state.cluster = 0
+            st.session_state.filtered_df = df
+            st.session_state.cluster = 0
+            
+            logger.info(f"Search completed: {len(df)} documents in {n_clusters} clusters")
+            
+        except Exception as e:
+            st.error(f"Error during search and clustering: {e}")
+            logger.error(f"Error in search and clustering: {e}")
+            return
 
     # Display and labeling interface
     if st.session_state.filtered_df is not None and "cluster" in st.session_state.filtered_df.columns:
@@ -198,10 +273,12 @@ def app():
         similar_docs = filtered_df[filtered_df['cluster'] == cluster]
         if similar_docs.empty:
             st.warning(f"Cluster {cluster+1} is empty. Try navigating to another cluster or adjust the search criteria.")
+            similar_docs = pd.DataFrame()  # Empty DataFrame
         elif len(similar_docs) < n_similares:
             st.info(f"Cluster {cluster+1} has only {len(similar_docs)} documents, fewer than the requested {n_similares}.")
-
-        similar_docs = similar_docs.head(n_similares)
+            similar_docs = similar_docs.head(n_similares)
+        else:
+            similar_docs = similar_docs.head(n_similares)
 
         # Labeling interface
         st.header("Selection of Cluster Labels")
@@ -224,49 +301,83 @@ def app():
 
         st.header("Similar Documents in the Cluster")
 
-        selected_similars = []
-        for idx, row in similar_docs.iterrows():
-            label_display = f" (Label: {row['label']})" if row['label'] else ""
-            display_text = f"[{row['id_doc']}] - {row['combined_text'][0:1000]}{label_display}"
-            if st.checkbox(display_text, key=idx, value=True):
-                selected_similars.append(idx)
+        if similar_docs.empty:
+            st.info("No documents to display in this cluster.")
+            selected_similars = []
+        else:
+            selected_similars = []
+            for idx, row in similar_docs.iterrows():
+                try:
+                    # Ensure we have valid data types
+                    doc_id = str(row.get('id_doc', idx))
+                    label = str(row.get('label', '')).strip()
+                    text_content = str(row.get('combined_text', '')).strip()
+                    
+                    label_display = f" (Label: {label})" if label else ""
+                    text_preview = text_content[:1000] if text_content else "[No text content]"
+                    display_text = f"[{doc_id}] - {text_preview}{label_display}"
+                    
+                    if st.checkbox(display_text, key=f"doc_{idx}", value=True):
+                        selected_similars.append(idx)
+                except Exception as e:
+                    logger.warning(f"Error displaying document {idx}: {e}")
+                    continue
 
-        if st.button("LABEL"):
+        if st.button("LABEL", key="label_button"):
             if selected_similars:
                 if selected_label is None and not new_label:
                     st.error("Please select a label or add a new label before labeling documents.")
                 else:
                     label_to_apply = selected_label if selected_label else new_label
-                    full_df = st.session_state.full_df.copy()  # Create a copy to avoid modifying the original
-                    filtered_df = st.session_state.filtered_df.copy()  # Create a copy to avoid modifying the original
-
-                    # Update labels in both DataFrames
-                    for idx in selected_similars:
-                        if idx in full_df.index:
-                            full_df.at[idx, 'label'] = label_to_apply
-                        if idx in filtered_df.index:
-                            filtered_df.at[idx, 'label'] = label_to_apply
-
-                    # Update existing_labels with the new label if it was just added
-                    if new_label and new_label not in st.session_state.existing_labels:
-                        st.session_state.existing_labels.append(new_label)
-                        st.session_state.existing_labels.sort()
-
-                    # Save the full DataFrame to the .parquet file
+                    label_to_apply = str(label_to_apply).strip()
+                    
+                    if not label_to_apply:
+                        st.error("Label cannot be empty.")
+                        return
+                    
                     try:
-                        # Ensure we're not losing any documents by comparing row counts
+                        full_df = st.session_state.full_df.copy()
+                        filtered_df = st.session_state.filtered_df.copy()
+
+                        # Update labels in both DataFrames
+                        updated_count = 0
+                        for idx in selected_similars:
+                            if idx in full_df.index:
+                                full_df.at[idx, 'label'] = label_to_apply
+                                updated_count += 1
+                            if idx in filtered_df.index:
+                                filtered_df.at[idx, 'label'] = label_to_apply
+
+                        # Update existing_labels with the new label if it was just added
+                        if new_label and new_label not in st.session_state.existing_labels:
+                            st.session_state.existing_labels.append(new_label)
+                            st.session_state.existing_labels.sort()
+
+                        # Save the full DataFrame to the .parquet file
                         original_count = len(st.session_state.full_df)
                         new_count = len(full_df)
-                        if new_count < original_count:
-                            st.error(f"Error: Document count decreased from {original_count} to {new_count}. Aborting save.")
+                        
+                        if new_count != original_count:
+                            st.error(f"Error: Document count changed from {original_count} to {new_count}. Aborting save.")
+                            logger.error(f"Document count mismatch: {original_count} -> {new_count}")
                             return
-                            
+                        
+                        if updated_count == 0:
+                            st.warning("No documents were updated.")
+                            return
+                             
                         full_df.to_parquet(parquet_file, index=False)
                         st.session_state.full_df = full_df
                         st.session_state.filtered_df = filtered_df
-                        st.success("Documents labeled successfully and file updated!")
+                        st.success(f"Successfully labeled {updated_count} documents with '{label_to_apply}'!")
+                        logger.info(f"Labeled {updated_count} documents with '{label_to_apply}'")
+                        
+                        # Force a rerun to refresh the display
+                        st.rerun()
+                        
                     except Exception as e:
                         st.error(f"Error saving file: {e}")
+                        logger.error(f"Error saving parquet file: {e}")
             else:
                 st.warning("No documents selected for labeling.")
 

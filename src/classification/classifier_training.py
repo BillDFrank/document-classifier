@@ -4,6 +4,9 @@ import numpy as np
 import os
 import time
 import joblib  # For saving models
+import json
+import logging
+from pathlib import Path
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import LabelEncoder
 from sklearn.linear_model import LogisticRegression
@@ -14,27 +17,46 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, classification_report
 import plotly.figure_factory as ff
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Get base directory from environment variable or use default
+BASE_DIR = Path(os.getenv('PROJECT_ROOT', '.')).resolve()
+
 # Directory where Parquet files are saved
-PARQUET_DIR = os.path.join("data", "processed")
+PARQUET_DIR = BASE_DIR / "data" / "processed"
 # Directory to save models
-MODEL_DIR = "models"
+MODEL_DIR = BASE_DIR / "models"
 
 # Create the models directory if it doesn't exist
-if not os.path.exists(MODEL_DIR):
-    os.makedirs(MODEL_DIR)
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 def app():
     st.title('Process Classification')
 
     # List available Parquet files
-    parquet_files = [f for f in os.listdir(PARQUET_DIR) if f.endswith('.parquet')]
-    if not parquet_files:
-        st.error("No Parquet files found in data/processed directory.")
+    try:
+        parquet_files = [f for f in os.listdir(PARQUET_DIR) if f.endswith('.parquet')]
+        if not parquet_files:
+            st.error(f"No Parquet files found in {PARQUET_DIR}")
+            logger.error(f"No Parquet files found in {PARQUET_DIR}")
+            return
+    except Exception as e:
+        st.error(f"Error accessing {PARQUET_DIR}: {str(e)}")
+        logger.error(f"Error accessing {PARQUET_DIR}: {str(e)}")
         return
 
     selected_file = st.sidebar.selectbox("Select a Parquet file", parquet_files)
-    file_path = os.path.join(PARQUET_DIR, selected_file)
-    df = pd.read_parquet(file_path)
+    file_path = PARQUET_DIR / selected_file
+    
+    try:
+        df = pd.read_parquet(file_path)
+        logger.info(f"Loaded {len(df)} records from {file_path}")
+    except Exception as e:
+        st.error(f"Error loading parquet file {file_path}: {str(e)}")
+        logger.error(f"Error loading parquet file {file_path}: {str(e)}")
+        return
 
     # Filter labeled data and remove rows without embeddings
     df_labeled = df[df['label'].notnull() & (df['label'].str.strip() != '')]
@@ -98,15 +120,31 @@ def app():
     # Button to start training
     if st.sidebar.button("Train Model"):
         # Prepare features and labels
-        X = np.array(df_labeled['embedding'].tolist())
-        y = np.array(df_labeled['label'].tolist())
-
+        try:
+            X = np.array(df_labeled['embedding'].tolist())
+            y = np.array(df_labeled['label'].tolist())
+            
+            if len(X) == 0 or len(y) == 0:
+                st.error("No valid data found for training")
+                logger.error("No valid data found for training")
+                return
+                
+            logger.info(f"Prepared {len(X)} samples for training")
+        except Exception as e:
+            st.error(f"Error preparing data: {str(e)}")
+            logger.error(f"Error preparing data: {str(e)}")
+            return
+    
         # Encode labels
-        label_encoder = LabelEncoder()
-        y_encoded = label_encoder.fit_transform(y)
-
-        # Check if it's binary classification
-        is_binary = len(label_encoder.classes_) == 2
+        try:
+            label_encoder = LabelEncoder()
+            y_encoded = label_encoder.fit_transform(y)
+            is_binary = len(label_encoder.classes_) == 2
+            logger.info(f"Encoded {len(label_encoder.classes_)} classes: {label_encoder.classes_}")
+        except Exception as e:
+            st.error(f"Error encoding labels: {str(e)}")
+            logger.error(f"Error encoding labels: {str(e)}")
+            return
 
         # Set up 5-fold cross-validation
         k = 5
@@ -224,15 +262,22 @@ def app():
         status_text.text("Training completed!")
 
         # Save the model (using the last trained model from the cross-validation loop)
-        parquet_base_name = os.path.splitext(selected_file)[0]  # Remove .parquet extension
-        model_filename = f"{parquet_base_name}_{selected_model.replace(' ', '')}.pkl"
-        model_path = os.path.join(MODEL_DIR, model_filename)
-        joblib.dump(model, model_path)
+        try:
+            parquet_base_name = os.path.splitext(selected_file)[0]  # Remove .parquet extension
+            model_filename = f"{parquet_base_name}_{selected_model.replace(' ', '')}.joblib"
+            model_path = MODEL_DIR / model_filename
+            joblib.dump(model, model_path)
+            logger.info(f"Model saved successfully: {model_path}")
 
-        # Save the LabelEncoder
-        label_encoder_filename = f"{parquet_base_name}_{selected_model.replace(' ', '')}_label_encoder.pkl"
-        label_encoder_path = os.path.join(MODEL_DIR, label_encoder_filename)
-        joblib.dump(label_encoder, label_encoder_path)
+            # Save the LabelEncoder
+            label_encoder_filename = f"{parquet_base_name}_{selected_model.replace(' ', '')}_label_encoder.joblib"
+            label_encoder_path = MODEL_DIR / label_encoder_filename
+            joblib.dump(label_encoder, label_encoder_path)
+            logger.info(f"LabelEncoder saved successfully: {label_encoder_path}")
+        except Exception as e:
+            st.error(f"Error saving model or label encoder: {str(e)}")
+            logger.error(f"Error saving model or label encoder: {str(e)}")
+            return
 
         st.write(f"Model saved as: {model_path}")
         st.write(f"LabelEncoder saved as: {label_encoder_path}")
@@ -264,30 +309,34 @@ def app():
         st.write(f"**Average Precision**: {avg_precision:.4f} (±{std_precision:.4f})")
         st.write(f"**Average Recall**: {avg_recall:.4f} (±{std_recall:.4f})")
         st.write(f"**Average F1-Score**: {avg_f1:.4f} (±{std_f1:.4f})")
-
-        # Create and display confusion matrix using Plotly
-        st.write("**Aggregate Confusion Matrix**:")
-        fig = ff.create_annotated_heatmap(
-            z=agg_conf_matrix,
-            x=class_names,
-            y=class_names,
-            colorscale='Blues',
-            showscale=True,
-            annotation_text=agg_conf_matrix.astype(str)
-        )
-        fig.update_layout(
-            title="Aggregate Confusion Matrix",
-            xaxis_title="Predicted Label",
-            yaxis_title="True Label",
-            width=500,
-            height=500
-        )
-        st.plotly_chart(fig)
-
-        # Display aggregated classification report
-        st.write("**Aggregated Classification Report (Across All Folds)**:")
-        report = classification_report(all_y_test_labels, all_y_pred_labels, target_names=class_names)
-        st.text(report)
+    
+        try:
+            # Create and display confusion matrix using Plotly
+            st.write("**Aggregate Confusion Matrix**:")
+            fig = ff.create_annotated_heatmap(
+                z=agg_conf_matrix,
+                x=class_names,
+                y=class_names,
+                colorscale='Blues',
+                showscale=True,
+                annotation_text=agg_conf_matrix.astype(str)
+            )
+            fig.update_layout(
+                title="Aggregate Confusion Matrix",
+                xaxis_title="Predicted Label",
+                yaxis_title="True Label",
+                width=500,
+                height=500
+            )
+            st.plotly_chart(fig)
+    
+            # Display aggregated classification report
+            st.write("**Aggregated Classification Report (Across All Folds)**:")
+            report = classification_report(all_y_test_labels, all_y_pred_labels, target_names=class_names)
+            st.text(report)
+        except Exception as e:
+            st.error(f"Error displaying results: {str(e)}")
+            logger.error(f"Error displaying results: {str(e)}")
 
 if __name__ == "__main__":
     app()

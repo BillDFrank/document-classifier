@@ -1,34 +1,55 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import os
 import joblib
+import logging
+import os
+from pathlib import Path
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import confusion_matrix
+import plotly.figure_factory as ff
 
-# Directory where Parquet files are saved
-PARQUET_DIR = os.path.join("data", "processed")
-# Directory where models are saved
-MODEL_DIR = "models"
-# Directory to save prediction output
-OUTPUT_DIR = "output"
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Create the output directory if it doesn't exist
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
+# Directory paths using pathlib.Path for cross-platform compatibility
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+PARQUET_DIR = BASE_DIR / "data" / "processed"
+MODEL_DIR = BASE_DIR / "models"
+OUTPUT_DIR = BASE_DIR / "output"
+
+# Create directories if they don't exist
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 def app():
     st.title('Classifier: Predict Labels for Unlabeled Data')
 
     # List available Parquet files
-    parquet_files = [f for f in os.listdir(PARQUET_DIR) if f.endswith('.parquet')]
-    if not parquet_files:
-        st.error("No Parquet files found in data/processed directory.")
+    try:
+        parquet_files = [f.name for f in PARQUET_DIR.glob('*.parquet')]
+        if not parquet_files:
+            st.error(f"No Parquet files found in {PARQUET_DIR}")
+            return
+    except Exception as e:
+        st.error(f"Error accessing parquet directory: {e}")
         return
 
-    # List available models
-    model_files = [f for f in os.listdir(MODEL_DIR) if f.endswith('.pkl') and not f.endswith('_label_encoder.pkl')]
-    if not model_files:
-        st.error("No models found in models directory. Train a model first using Classifier Training.")
+    # List available models - support both .pkl and .joblib extensions
+    try:
+        model_files = [
+            f.name for f in MODEL_DIR.glob('*.pkl')
+            if not f.name.endswith('_label_encoder.pkl')
+        ] + [
+            f.name for f in MODEL_DIR.glob('*.joblib')
+            if not f.name.endswith('_label_encoder.joblib')
+        ]
+        if not model_files:
+            st.error(f"No models found in {MODEL_DIR}. Train a model first using Classifier Training.")
+            return
+    except Exception as e:
+        st.error(f"Error accessing models directory: {e}")
         return
 
     # Sidebar inputs
@@ -46,8 +67,12 @@ def app():
     # Button to start prediction
     if st.sidebar.button("Predict Labels"):
         # Load the Parquet file
-        file_path = os.path.join(PARQUET_DIR, selected_file)
-        df = pd.read_parquet(file_path)
+        file_path = PARQUET_DIR / selected_file
+        try:
+            df = pd.read_parquet(file_path)
+        except Exception as e:
+            st.error(f"Error loading parquet file: {e}")
+            return
 
         # Filter rows based on prediction scope
         if prediction_scope == "Only Unlabeled Rows":
@@ -75,20 +100,29 @@ def app():
         st.write(f"Found {len(df_to_predict)} rows with embeddings for prediction.")
 
         # Load the model
-        model_path = os.path.join(MODEL_DIR, selected_model_file)
+        model_path = MODEL_DIR / selected_model_file
         try:
             model = joblib.load(model_path)
         except Exception as e:
             st.error(f"Error loading model: {e}")
+            logger.error(f"Failed to load model from {model_path}: {e}")
             return
 
         # Load the corresponding LabelEncoder
-        label_encoder_filename = f"{os.path.splitext(selected_model_file)[0]}_label_encoder.pkl"
-        label_encoder_path = os.path.join(MODEL_DIR, label_encoder_filename)
+        base_name = os.path.splitext(selected_model_file)[0]
+        label_encoder_filename = f"{base_name}_label_encoder.pkl"
+        label_encoder_path = MODEL_DIR / label_encoder_filename
+        
+        # Also check for .joblib extension for label encoder
+        if not label_encoder_path.exists():
+            label_encoder_filename = f"{base_name}_label_encoder.joblib"
+            label_encoder_path = MODEL_DIR / label_encoder_filename
+            
         try:
             label_encoder = joblib.load(label_encoder_path)
         except Exception as e:
             st.error(f"Error loading LabelEncoder: {e}")
+            logger.error(f"Failed to load label encoder from {label_encoder_path}: {e}")
             return
 
         # Prepare features
@@ -145,9 +179,6 @@ def app():
                 st.write(f"Accuracy on previously labeled data: {accuracy:.2%}")
                 
                 # Show confusion matrix for rows with original labels
-                from sklearn.metrics import confusion_matrix
-                import plotly.figure_factory as ff
-                
                 # Get unique labels and ensure they're in the same order as the label encoder
                 unique_labels = label_encoder.classes_
                 
@@ -190,9 +221,16 @@ def app():
         parquet_base_name = os.path.splitext(selected_file)[0]
         model_name = os.path.splitext(selected_model_file)[0].split('_')[-1]
         output_filename = f"{parquet_base_name}_{model_name}_predictions.csv"
-        output_path = os.path.join(OUTPUT_DIR, output_filename)
-        results_df.to_csv(output_path, index=False)
-        st.write(f"Predictions saved to: {output_path}")
+        output_path = OUTPUT_DIR / output_filename
+        
+        try:
+            results_df.to_csv(output_path, index=False)
+            st.success(f"Predictions saved to: {output_path}")
+            logger.info(f"Successfully saved {len(results_df)} predictions to {output_path}")
+        except Exception as e:
+            st.error(f"Error saving predictions: {e}")
+            logger.error(f"Failed to save predictions to {output_path}: {e}")
+            return
 
         # Display a sample of the results
         st.write("### Sample of Predictions")
