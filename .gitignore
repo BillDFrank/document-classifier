@@ -178,4 +178,8 @@ cython_debug/
 *.csv
 *.txt
 *.parquet
-.pkl
+*.pkl
+*.joblib
+*.index
+*.faiss
+*.ipynb

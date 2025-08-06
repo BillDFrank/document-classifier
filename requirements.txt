@@ -120,7 +120,7 @@ scikit-learn==1.6.1
 scipy==1.15.2
 seaborn==0.13.2
 Send2Trash @ file:///C:/b/abs_7e73ol18dl/croot/send2trash_1736542724140/work
-sentence-transformers==4.0.2
+sentence-transformers==2.7.0
 six @ file:///home/conda/feedstock_root/build_artifacts/six_1733380938961/work
 sklearn-compat==0.1.3
 smmap==5.0.2
@@ -151,3 +151,7 @@ Werkzeug==3.1.3
 widgetsnbextension==4.0.14
 win-inet-pton @ file:///C:/ci_311/win_inet_pton_1676425458225/work
 zipp @ file:///home/conda/feedstock_root/build_artifacts/zipp_1732827521216/work
+faiss-cpu==1.8.0
+requests==2.32.3
+openpyxl==3.1.5
+
