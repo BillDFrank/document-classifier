@@ -6,16 +6,37 @@ from sentence_transformers import SentenceTransformer, util
 def load_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
+def get_excel_sheet_names(uploaded_file):
+    """Get sheet names from Excel file without reading the entire file"""
+    if uploaded_file is None:
+        return []
+    try:
+        excel_file = pd.ExcelFile(uploaded_file)
+        return excel_file.sheet_names
+    except Exception as e:
+        st.error(f"Failed to read Excel file sheets: {e}")
+        return []
+
 def app():
     st.title("Text Comparator")
 
     model = load_model()
 
+    # Initialize session state for sheet selections
+    if 'sheet_1_selected' not in st.session_state:
+        st.session_state.sheet_1_selected = None
+    if 'sheet_2_selected' not in st.session_state:
+        st.session_state.sheet_2_selected = None
+    if 'file_1_processed' not in st.session_state:
+        st.session_state.file_1_processed = False
+    if 'file_2_processed' not in st.session_state:
+        st.session_state.file_2_processed = False
+
     st.header("Upload CSV or XLSX Files")
     uploaded_file_1 = st.file_uploader("Upload the first file (CSV or XLSX)", type=["csv", "xlsx"])
     uploaded_file_2 = st.file_uploader("Upload the second file (CSV or XLSX)", type=["csv", "xlsx"])
 
-    def read_file(uploaded_file):
+    def read_file(uploaded_file, sheet_name=None):
         if uploaded_file is None:
             return None
         if uploaded_file.name.lower().endswith('.csv'):
@@ -33,7 +54,10 @@ def app():
                 return None
         elif uploaded_file.name.lower().endswith('.xlsx'):
             try:
-                return pd.read_excel(uploaded_file)
+                if sheet_name is not None:
+                    return pd.read_excel(uploaded_file, sheet_name=sheet_name)
+                else:
+                    return pd.read_excel(uploaded_file)
             except Exception as e:
                 st.error(f"Failed to read XLSX file: {e}")
                 return None
@@ -41,10 +65,53 @@ def app():
             st.error("Unsupported file type. Please upload a CSV or XLSX file.")
             return None
 
-    if uploaded_file_1 and uploaded_file_2:
+    # Process first file
+    if uploaded_file_1:
+        if uploaded_file_1.name.lower().endswith('.xlsx'):
+            sheet_names_1 = get_excel_sheet_names(uploaded_file_1)
+            if sheet_names_1:
+                selected_sheet_1 = st.selectbox(
+                    "Select sheet from first Excel file",
+                    sheet_names_1,
+                    key="sheet_1_selector"
+                )
+                st.session_state.sheet_1_selected = selected_sheet_1
+                st.session_state.file_1_processed = True
+            else:
+                st.error("Could not read sheets from first Excel file.")
+                st.session_state.file_1_processed = False
+        else:
+            # CSV file - no sheet selection needed
+            st.session_state.file_1_processed = True
+            st.session_state.sheet_1_selected = None
+
+    # Process second file
+    if uploaded_file_2:
+        if uploaded_file_2.name.lower().endswith('.xlsx'):
+            sheet_names_2 = get_excel_sheet_names(uploaded_file_2)
+            if sheet_names_2:
+                selected_sheet_2 = st.selectbox(
+                    "Select sheet from second Excel file",
+                    sheet_names_2,
+                    key="sheet_2_selector"
+                )
+                st.session_state.sheet_2_selected = selected_sheet_2
+                st.session_state.file_2_processed = True
+            else:
+                st.error("Could not read sheets from second Excel file.")
+                st.session_state.file_2_processed = False
+        else:
+            # CSV file - no sheet selection needed
+            st.session_state.file_2_processed = True
+            st.session_state.sheet_2_selected = None
+
+    # Only proceed if both files are uploaded and processed
+    if uploaded_file_1 and uploaded_file_2 and st.session_state.file_1_processed and st.session_state.file_2_processed:
         try:
-            df1 = read_file(uploaded_file_1)
-            df2 = read_file(uploaded_file_2)
+            # Read files with selected sheets
+            df1 = read_file(uploaded_file_1, st.session_state.sheet_1_selected)
+            df2 = read_file(uploaded_file_2, st.session_state.sheet_2_selected)
+
             if df1 is None or df2 is None:
                 return
 
@@ -72,7 +139,7 @@ def app():
                     results = []
                     for i in range(len(texts1)):
                         best_match_score, best_match_idx = cosine_scores[i].max(dim=0)
-                        
+
                         if best_match_score.item() >= similarity_threshold:
                             best_match_idx_item = best_match_idx.item()
                             similar_text = texts2[best_match_idx_item]
@@ -92,7 +159,7 @@ def app():
                                 "Similarity Score": f"{best_match_score.item():.4f}",
                                 f"Output from '{output_col}'": no_similar_text_fill
                             })
-                
+
                 st.header("Comparison Results")
                 if results:
                     results_df = pd.DataFrame(results)
@@ -107,7 +174,6 @@ def app():
                     )
                 else:
                     st.info("No results to display.")
-
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
