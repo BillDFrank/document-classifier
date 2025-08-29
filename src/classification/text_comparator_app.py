@@ -118,7 +118,27 @@ def app():
             st.header("Select Columns to Compare")
             col1 = st.selectbox("Select column from the first file", df1.columns)
             col2 = st.selectbox("Select column from the second file to compare", df2.columns)
-            output_col = st.selectbox("Select column from the second file to output", df2.columns)
+
+            st.header("Select Additional Columns to Output (Optional)")
+            st.write("Choose columns from both files to include in the results:")
+
+            # Multiselect for df1 columns (excluding the comparison column)
+            available_df1_cols = [col for col in df1.columns if col != col1]
+            selected_df1_cols = st.multiselect(
+                "Select columns from first file to include in output",
+                available_df1_cols,
+                default=[],
+                help="These columns will be included as 'df1.column_name' in the results"
+            )
+
+            # Multiselect for df2 columns (excluding the comparison column)
+            available_df2_cols = [col for col in df2.columns if col != col2]
+            selected_df2_cols = st.multiselect(
+                "Select columns from second file to include in output",
+                available_df2_cols,
+                default=[],
+                help="These columns will be included as 'df2.column_name' in the results"
+            )
 
             similarity_threshold = st.slider("Similarity Threshold", 0.0, 1.0, 0.7, 0.05)
 
@@ -140,25 +160,46 @@ def app():
                     for i in range(len(texts1)):
                         best_match_score, best_match_idx = cosine_scores[i].max(dim=0)
 
+                        # Create base result dictionary
+                        result_dict = {
+                            "Text from File 1": texts1[i],
+                            "Similarity Score": f"{best_match_score.item():.4f}",
+                        }
+
                         if best_match_score.item() >= similarity_threshold:
                             best_match_idx_item = best_match_idx.item()
                             similar_text = texts2[best_match_idx_item]
-                            output_value = df2.loc[best_match_idx_item, output_col]
-                            if pd.isna(output_value) or str(output_value).strip() == "":
-                                output_value = blank_output_fill
-                            results.append({
-                                "Text from File 1": texts1[i],
-                                "Most Similar Text from File 2": similar_text,
-                                "Similarity Score": f"{best_match_score.item():.4f}",
-                                f"Output from '{output_col}'": output_value
-                            })
+                            result_dict["Most Similar Text from File 2"] = similar_text
+
+                            # Add selected columns from df1
+                            for col in selected_df1_cols:
+                                value = df1.loc[i, col]
+                                if pd.isna(value):
+                                    value = ""
+                                result_dict[f"df1.{col}"] = str(value)
+
+                            # Add selected columns from df2
+                            for col in selected_df2_cols:
+                                value = df2.loc[best_match_idx_item, col]
+                                if pd.isna(value):
+                                    value = ""
+                                result_dict[f"df2.{col}"] = str(value)
+
                         else:
-                            results.append({
-                                "Text from File 1": texts1[i],
-                                "Most Similar Text from File 2": no_similar_text_fill,
-                                "Similarity Score": f"{best_match_score.item():.4f}",
-                                f"Output from '{output_col}'": no_similar_text_fill
-                            })
+                            result_dict["Most Similar Text from File 2"] = no_similar_text_fill
+
+                            # Add selected columns from df1 (no match found)
+                            for col in selected_df1_cols:
+                                value = df1.loc[i, col]
+                                if pd.isna(value):
+                                    value = ""
+                                result_dict[f"df1.{col}"] = str(value)
+
+                            # Add selected columns from df2 with fill value
+                            for col in selected_df2_cols:
+                                result_dict[f"df2.{col}"] = no_similar_text_fill
+
+                        results.append(result_dict)
 
                 st.header("Comparison Results")
                 if results:
