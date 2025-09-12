@@ -1,6 +1,6 @@
-# Document Classifier
+# Text Classifier
 
-A comprehensive Python-based system for document classification, text comparison, clustering, and analysis. This project provides multiple Streamlit applications for processing text data, training classifiers, performing clustering, detecting similarities, and generating visualizations.
+A comprehensive Python-based system for text classification, text comparison, clustering, and analysis. This project provides multiple Streamlit applications for processing text data, training classifiers, performing clustering, detecting similarities, and generating visualizations.
 
 ## ✨ Key Features
 
@@ -25,8 +25,8 @@ A comprehensive Python-based system for document classification, text comparison
 
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/BillDFrank/document-classifier.git
-   cd document-classifier
+   git clone https://github.com/BillDFrank/text-classifier.git
+   cd text-classifier
    ```
 
 2. **Set Up a Virtual Environment (recommended)**:
@@ -63,7 +63,7 @@ The main entry point is `run_pipeline.py`, which provides access to all applicat
 - Advanced similarity scoring with customizable thresholds
 - Download comparison results as CSV
 
-### 📊 Document Classifier
+### 📊 Text Classifier
 - Train machine learning models for text classification
 - Support for multiple algorithms (SVM, Random Forest, Neural Networks, etc.)
 - Model evaluation with detailed metrics and confusion matrices
@@ -87,7 +87,7 @@ The main entry point is `run_pipeline.py`, which provides access to all applicat
 ## Project Structure
 
 ```
-document-classifier/
+text-classifier/
 ├── data/
 │   ├── raw/              # Raw input data
 │   └── processed/        # Processed data
